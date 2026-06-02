@@ -42,7 +42,6 @@ jobs:
     name: Deploy Infrastructure (Subscription Scope)
     if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
     runs-on: ubuntu-latest
-    environment: development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -79,7 +78,6 @@ jobs:
     name: Deploy Infrastructure (Resource Group Scope)
     if: ${{ github.event.inputs.deploymentScope == 'resourceGroup' }}
     runs-on: ubuntu-latest
-    environment: development
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -120,7 +118,6 @@ jobs:
       - deploy-subscription-scope
       - deploy-resource-group-scope
     runs-on: ubuntu-latest
-    environment: development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
