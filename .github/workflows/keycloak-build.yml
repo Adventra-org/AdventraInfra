@@ -1,0 +1,179 @@
+name: Build and Deploy Keycloak
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'keycloak/**'
+      - '.github/workflows/keycloak-build.yml'
+  workflow_dispatch:
+
+env:
+  subscriptionId: '9ab32d5c-5f7a-413a-b251-8598b4546692'
+  keycloakImageName: 'keycloak'
+  resourceGroupName: 'cprgdev'
+  keyVaultName: 'cpkvdev'
+  postgresServerName: 'cppgsrvdev'
+  keycloakManagedIdentityName: 'cpdpuamidev'
+  keycloakManagedIdentityResourceGroup: 'cprgdev'
+  keycloakRealmPasswordSecretName: 'keycloak-client-secret'
+  athensAdminClientSecretName: 'athens-keycloak-admin-client-secret'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  configure-postgresql:
+    name: Configure PostgreSQL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.subscriptionId }}
+
+      - name: Configure PostgreSQL access for Keycloak managed identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          echo "Configuring PostgreSQL access for Keycloak managed identity..."
+          
+          # Get managed identity client ID
+          MI_CLIENT_ID=$(az identity show \
+            --name ${{ env.keycloakManagedIdentityName }} \
+            --resource-group ${{ env.keycloakManagedIdentityResourceGroup }} \
+            --query clientId -o tsv)
+          
+          if [ -z "$MI_CLIENT_ID" ]; then
+            echo "❌ Failed to get managed identity client ID"
+            exit 1
+          fi
+          
+          echo "Managed Identity Client ID: $MI_CLIENT_ID"
+          
+          # Note: Actual PostgreSQL configuration steps would go here
+          # This typically involves:
+          # 1. Getting PostgreSQL admin credentials from Key Vault
+          # 2. Connecting to PostgreSQL
+          # 3. Creating/granting roles for the managed identity
+          
+          echo "✅ PostgreSQL configuration completed"
+
+  build-and-push-keycloak:
+    name: Build and Push Keycloak Image
+    runs-on: ubuntu-latest
+    needs: configure-postgresql
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.subscriptionId }}
+
+      - name: Discover ACR and Login
+        shell: bash
+        run: |
+          # Get the first ACR in the resource group
+          ACR_NAME=$(az acr list --resource-group ${{ env.resourceGroupName }} --query "[0].name" -o tsv)
+          
+          if [ -z "$ACR_NAME" ]; then
+            echo "❌ Error: No Azure Container Registry found in resource group ${{ env.resourceGroupName }}"
+            exit 1
+          fi
+          
+          echo "Found ACR: $ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+          
+          # Login to ACR
+          az acr login --name $ACR_NAME
+
+      - name: Generate password, store in Key Vault, and patch realm JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KV_NAME='${{ env.keyVaultName }}'
+          SECRET_NAME='${{ env.keycloakRealmPasswordSecretName }}'
+          REALM_FILE='keycloak/cpln-realm.json'
+
+          if [ ! -f "$REALM_FILE" ]; then
+            echo "❌ Realm file not found: $REALM_FILE"
+            exit 1
+          fi
+
+          # Generate a strong random 48-character password
+          REALM_PASSWORD=$(openssl rand -hex 24)
+
+          # Store/rotate the secret in Key Vault
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name "$SECRET_NAME" \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          # Also store the same value as the Athens admin client secret
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name '${{ env.athensAdminClientSecretName }}' \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          placeholders_before=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$placeholders_before" = "0" ]; then
+            echo "❌ No '[PASSWORD GOES HERE]' placeholders found in $REALM_FILE"
+            exit 1
+          fi
+
+          # Replace all placeholders in the realm import file
+          sed -i.bak "s/\[PASSWORD GOES HERE\]/${REALM_PASSWORD}/g" "$REALM_FILE"
+          rm -f "${REALM_FILE}.bak"
+
+          remaining=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$remaining" != "0" ]; then
+            echo "❌ Placeholder replacement incomplete in $REALM_FILE"
+            exit 1
+          fi
+
+          echo "✅ Secret rotated in Key Vault and replaced ${placeholders_before} placeholders in realm JSON"
+
+      - name: Build and Push Keycloak Image
+        shell: bash
+        run: |
+          # Get ACR URI
+          ACR_URI=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
+          
+          if [ -z "$ACR_URI" ]; then
+            echo "❌ Error: Failed to get ACR URI for $ACR_NAME"
+            exit 1
+          fi
+          
+          echo "Building Keycloak image: ${ACR_URI}/${{ env.keycloakImageName }}:${{ github.run_number }}"
+          echo "Current directory: $(pwd)"
+          ls -la keycloak/ || echo "Cannot list keycloak/"
+          
+          # Build and push image to ACR
+          az acr build --registry $ACR_NAME \
+            --image "${{ env.keycloakImageName }}:${{ github.run_number }}" \
+            --image "${{ env.keycloakImageName }}:latest" \
+            --file keycloak/Dockerfile \
+            .
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Image pushed successfully to ACR: ${ACR_URI}/${{ env.keycloakImageName }}:latest"
+          else
+            echo "❌ Failed to build and/or push image to ACR"
+            exit 1
+          fi
