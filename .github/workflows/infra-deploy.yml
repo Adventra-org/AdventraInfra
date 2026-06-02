@@ -47,7 +47,6 @@ jobs:
       bicepTemplate: 'AdventraInfra/bicep/main.bicep'
       bicepParamsFile: 'AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam'
       deploymentName: 'adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}'
-      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -100,7 +99,6 @@ jobs:
     # Run if either deployment job ran (one will be skipped based on scope)
     uses: ./.github/workflows/templates/lockdown-pgsql.yml
     with:
-      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       resourceGroup: ${{ github.event.inputs.resourceGroup || 'cprgdev' }}
       postgresServerName: ${{ github.event.inputs.postgresServerName }}
     secrets:

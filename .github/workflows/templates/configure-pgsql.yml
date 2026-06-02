@@ -3,9 +3,6 @@ name: Configure PostgreSQL
 on:
   workflow_call:
     inputs:
-      subscriptionId:
-        required: true
-        type: string
       resourceGroup:
         required: true
         type: string
@@ -47,7 +44,7 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ inputs.subscriptionId }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Enable Entra ID Authentication
         shell: bash
@@ -55,7 +52,7 @@ jobs:
           set -euxo pipefail
 
           az postgres flexible-server update \
-            --subscription "${{ inputs.subscriptionId }}" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --resource-group "${{ inputs.resourceGroup }}" \
             --name "${{ inputs.postgresServerName }}" \
             --password-auth Enabled \
