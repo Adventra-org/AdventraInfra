@@ -30,6 +30,7 @@ jobs:
   deploy-bicep:
     name: Deploy Bicep to Subscription
     runs-on: ubuntu-latest
+    environment: development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

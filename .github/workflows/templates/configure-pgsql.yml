@@ -37,6 +37,7 @@ jobs:
   configure-pgsql:
     name: Configure PostgreSQL with Managed Identity
     runs-on: ubuntu-latest
+    environment: development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

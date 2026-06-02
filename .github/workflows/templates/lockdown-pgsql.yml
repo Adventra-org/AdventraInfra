@@ -24,6 +24,7 @@ jobs:
   lockdown-postgresql:
     name: Lockdown PostgreSQL - Entra ID Only (Public Access Allowed)
     runs-on: ubuntu-latest
+    environment: development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
