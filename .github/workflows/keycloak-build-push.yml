@@ -7,7 +7,7 @@ on:
       - main
     paths:
       - 'keycloak/**'
-      - '.github/workflows/keycloak-build.yml'
+      - '.github/workflows/keycloak-build-push.yml'
   workflow_dispatch:
 
 env:
@@ -28,7 +28,6 @@ permissions:
 jobs:
   configure-postgresql:
     name: Configure PostgreSQL
-    environment: development
     uses: ./.github/workflows/configure-pgsql.yml
     with:
       resourceGroup: 'cprgdev'
