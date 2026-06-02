@@ -206,99 +206,90 @@ jobs:
 
           echo "✅ PostgreSQL configured for Entra ID managed identity auth"
 
+      - name: Create PostGIS Extension in Plana DB
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      - task: AzureCLI@2
-        displayName: "Create PostGIS Extension in Plana DB"
-        inputs:
-          azureSubscription: ${{ parameters.serviceConnectionName }}
-          scriptType: bash
-          scriptLocation: inlineScript
-          inlineScript: |
-            set -euxo pipefail
+          PG_SERVER="${{ inputs.postgresServerName }}"
+          PG_HOST="$PG_SERVER.postgres.database.azure.com"
+          PLANA_DB_NAME="plana"
 
-            PG_SERVER="${{ parameters.postgresServerName }}"
-            PG_HOST="$PG_SERVER.postgres.database.azure.com"
-            PLANA_DB_NAME="plana"
+          OVERRIDE_NAME="${{ inputs.servicePrincipalDisplayNameOverride }}"
+          if [ -n "$OVERRIDE_NAME" ]; then
+            SP_DISPLAY_NAME="$OVERRIDE_NAME"
+          else
+            SP_APP_ID=$(az account show --query user.name -o tsv)
+            SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+          fi
 
-            OVERRIDE_NAME="${{ parameters.servicePrincipalDisplayNameOverride }}"
-            if [ -n "$OVERRIDE_NAME" ]; then
-              SP_DISPLAY_NAME="$OVERRIDE_NAME"
-            else
-              SP_APP_ID=$(az account show --query user.name -o tsv)
-              SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
-            fi
+          export PGPASSWORD
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
 
-            export PGPASSWORD
-            PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
 
-            IDENTITY_NAME="${{ parameters.keycloakManagedIdentityName }}"
+          psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
+            "CREATE EXTENSION IF NOT EXISTS postgis; \
+             GRANT azure_pg_admin TO \"$IDENTITY_NAME\";"
 
-            psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
-              "CREATE EXTENSION IF NOT EXISTS postgis; \
-               GRANT azure_pg_admin TO \"$IDENTITY_NAME\";"
+          echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in plana database"
 
-            echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in plana database"
+      - name: Store Keycloak DB Config in Key Vault
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      - task: AzureCLI@2
-        displayName: "Store Keycloak DB Config in Key Vault"
-        inputs:
-          azureSubscription: ${{ parameters.serviceConnectionName }}
-          scriptType: bash
-          scriptLocation: inlineScript
-          inlineScript: |
-            set -euxo pipefail
+          KC_DB_NAME="keycloak"
+          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
+          PG_SERVER="${{ inputs.postgresServerName }}"
+          KV_NAME="${{ inputs.keyVaultName }}"
 
-            KC_DB_NAME="keycloak"
-            IDENTITY_NAME="${{ parameters.keycloakManagedIdentityName }}"
-            PG_SERVER="${{ parameters.postgresServerName }}"
-            KV_NAME="${{ parameters.keyVaultName }}"
+          SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
+          KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
 
-            SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
-            KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
+          set_secret_with_retry() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local attempt=1
+            local max_attempts=20
+            local delay_seconds=30
 
-            set_secret_with_retry() {
-              local secret_name="$1"
-              local secret_value="$2"
-              local attempt=1
-              local max_attempts=20
-              local delay_seconds=30
-
-              while [ "$attempt" -le "$max_attempts" ]; do
-                if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" >/dev/null 2>&1; then
-                  echo "✅ Secret set: $secret_name"
-                  return 0
-                fi
-
-                echo "⚠️ Failed to set '$secret_name' (attempt $attempt/$max_attempts)."
-                if [ "$attempt" -lt "$max_attempts" ]; then
-                  echo "Waiting ${delay_seconds}s for RBAC propagation..."
-                  sleep "$delay_seconds"
-                fi
-                attempt=$((attempt + 1))
-              done
-
-              echo "❌ Unable to set secret '$secret_name' after $max_attempts attempts"
-              return 1
-            }
-
-            # Retry writes to handle role-assignment propagation delays.
-            set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME" || true
-            set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com" || true
-            set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME" || true
-            set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME" || true
-
-            # Final verification pass to ensure each secret exists.
-            for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
-              if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
-                echo "❌ Secret missing after retries: $s"
-                echo "Caller object ID (from current az context): $SP_OBJECT_ID"
-                echo "Key Vault scope: $KV_ID"
-                echo "Expected RBAC role: Key Vault Secrets Officer (b86a8fe4-44ce-4948-aee5-eccb2c155cd7)"
-                echo ""
-                echo "Role assignments currently visible for caller at vault scope:"
-                az role assignment list --assignee "$SP_OBJECT_ID" --scope "$KV_ID" --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
-                exit 1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" >/dev/null 2>&1; then
+                echo "✅ Secret set: $secret_name"
+                return 0
               fi
+
+              echo "⚠️ Failed to set '$secret_name' (attempt $attempt/$max_attempts)."
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Waiting ${delay_seconds}s for RBAC propagation..."
+                sleep "$delay_seconds"
+              fi
+              attempt=$((attempt + 1))
             done
 
-            echo "✅ Keycloak DB config stored in Key Vault"
+            echo "❌ Unable to set secret '$secret_name' after $max_attempts attempts"
+            return 1
+          }
+
+          # Retry writes to handle role-assignment propagation delays.
+          set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME" || true
+          set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com" || true
+          set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME" || true
+          set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME" || true
+
+          # Final verification pass to ensure each secret exists.
+          for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
+            if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
+              echo "❌ Secret missing after retries: $s"
+              echo "Caller object ID (from current az context): $SP_OBJECT_ID"
+              echo "Key Vault scope: $KV_ID"
+              echo "Expected RBAC role: Key Vault Secrets Officer (b86a8fe4-44ce-4948-aee5-eccb2c155cd7)"
+              echo ""
+              echo "Role assignments currently visible for caller at vault scope:"
+              az role assignment list --assignee "$SP_OBJECT_ID" --scope "$KV_ID" --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+              exit 1
+            fi
+          done
+
+          echo "✅ Keycloak DB config stored in Key Vault"
