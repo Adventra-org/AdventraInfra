@@ -41,7 +41,7 @@ jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
     if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
-    uses: ./.github/workflows/templates/deploy-bicep.yml
+    uses: ./.github/workflows/deploy-bicep.yml
     with:
       location: ${{ github.event.inputs.location }}
       bicepTemplate: 'AdventraInfra/bicep/main.bicep'
@@ -97,7 +97,7 @@ jobs:
       - deploy-subscription-scope
       - deploy-resource-group-scope
     # Run if either deployment job ran (one will be skipped based on scope)
-    uses: ./.github/workflows/templates/lockdown-pgsql.yml
+    uses: ./.github/workflows/lockdown-pgsql.yml
     with:
       resourceGroup: ${{ github.event.inputs.resourceGroup || 'cprgdev' }}
       postgresServerName: ${{ github.event.inputs.postgresServerName }}
