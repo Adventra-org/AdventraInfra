@@ -1,4 +1,4 @@
-name: egw-infra
+name: Adventra Infrastructure Deployment
 
 on:
   workflow_dispatch:
@@ -10,21 +10,54 @@ on:
         options:
           - dev
           - prod
-      resourceGroup:
-        description: Target resource group
+      deploymentScope:
+        description: Deployment scope
         required: true
+        type: choice
+        options:
+          - resourceGroup
+          - subscription
+      resourceGroup:
+        description: Target resource group (for resourceGroup scope)
+        required: false
       location:
         description: Azure region
         required: false
         default: eastus2
+      lockdownPostgres:
+        description: Lockdown PostgreSQL after deployment (Entra ID only)
+        required: false
+        type: boolean
+        default: false
+      postgresServerName:
+        description: PostgreSQL server name (required if lockdownPostgres is true)
+        required: false
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  validate-and-deploy:
+  deploy-subscription-scope:
+    name: Deploy Infrastructure (Subscription Scope)
+    if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
+    uses: ./.github/workflows/templates/deploy-bicep.yml
+    with:
+      location: ${{ github.event.inputs.location }}
+      bicepTemplate: 'AdventraInfra/bicep/main.bicep'
+      bicepParamsFile: 'AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam'
+      deploymentName: 'adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}'
+      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  deploy-resource-group-scope:
+    name: Deploy Infrastructure (Resource Group Scope)
+    if: ${{ github.event.inputs.deploymentScope == 'resourceGroup' }}
     runs-on: ubuntu-latest
+    steps:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,16 +79,32 @@ jobs:
         run: |
           az deployment group validate \
             --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file EGW_Azure_Infrastructure/bicep/main.bicep \
-            --parameters EGW_Azure_Infrastructure/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam \
-            --parameters postgresAdminPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+            --template-file AdventraInfra/bicep/main.bicep \
+            --parameters AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam
 
       - name: Deploy Bicep
         run: |
           az deployment group create \
             --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file EGW_Azure_Infrastructure/bicep/main.bicep \
-            --parameters EGW_Azure_Infrastructure/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam \
-            --parameters postgresAdminPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}' \
+            --template-file AdventraInfra/bicep/main.bicep \
+            --parameters AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam \
             --query "properties.outputs" \
             --output jsonc
+
+  lockdown-postgresql:
+    name: Lockdown PostgreSQL (Entra ID Only)
+    if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
+    needs: 
+      - deploy-subscription-scope
+      - deploy-resource-group-scope
+    # Run if either deployment job ran (one will be skipped based on scope)
+    uses: ./.github/workflows/templates/lockdown-pgsql.yml
+    with:
+      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      resourceGroup: ${{ github.event.inputs.resourceGroup || 'cprgdev' }}
+      postgresServerName: ${{ github.event.inputs.postgresServerName }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+

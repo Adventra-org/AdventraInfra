@@ -1,0 +1,306 @@
+name: Configure PostgreSQL
+
+on:
+  workflow_call:
+    inputs:
+      subscriptionId:
+        required: true
+        type: string
+      resourceGroup:
+        required: true
+        type: string
+      keyVaultName:
+        required: true
+        type: string
+      postgresServerName:
+        required: true
+        type: string
+      keycloakManagedIdentityName:
+        required: true
+        type: string
+      keycloakManagedIdentityResourceGroup:
+        required: true
+        type: string
+      servicePrincipalDisplayNameOverride:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+jobs:
+  configure-pgsql:
+    name: Configure PostgreSQL with Managed Identity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.subscriptionId }}
+
+      - name: Enable Entra ID Authentication
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          az postgres flexible-server update \
+            --subscription "${{ inputs.subscriptionId }}" \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --name "${{ inputs.postgresServerName }}" \
+            --password-auth Enabled \
+            --microsoft-entra-auth Enabled \
+            || echo "⚠️ Entra auth may already be enabled"
+
+          echo "✅ Entra ID and password authentication enabled (dual-auth mode)"
+
+      - name: Add Pipeline Service Principal as Entra Admin
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          SP_APP_ID=$(az account show --query user.name -o tsv)
+          SP_OBJECT_ID=$(az ad sp show --id "$SP_APP_ID" --query id -o tsv)
+          SP_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+
+          CURRENT_ADMINS=$(az postgres flexible-server microsoft-entra-admin list \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --server-name "${{ inputs.postgresServerName }}" \
+            --query "[].{objectId:objectId, name:principalName}" -o json 2>/dev/null || echo "[]")
+
+          ADMIN_EXISTS=$(echo "$CURRENT_ADMINS" | jq -r --arg oid "$SP_OBJECT_ID" '.[] | select(.objectId==$oid) | .objectId' || echo "")
+
+          if [ -z "$ADMIN_EXISTS" ]; then
+            az postgres flexible-server microsoft-entra-admin create \
+              --resource-group "${{ inputs.resourceGroup }}" \
+              --server-name "${{ inputs.postgresServerName }}" \
+              --object-id "$SP_OBJECT_ID" \
+              --display-name "$SP_NAME" \
+              --type ServicePrincipal
+
+            echo "⏳ Waiting 60 seconds for admin role to propagate..."
+            sleep 60
+          fi
+
+          echo "✅ Service principal is Entra admin"
+
+      - name: Setup PostgreSQL Database with Managed Identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PG_SERVER="${{ inputs.postgresServerName }}"
+          PG_HOST="$PG_SERVER.postgres.database.azure.com"
+          KC_DB_NAME="keycloak"
+          HERMES_DB_NAME="hermes"
+          PLANA_DB_NAME="plana"
+          UZERCHE_DB_NAME="uzerche"
+          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
+          IDENTITY_RG="${{ inputs.keycloakManagedIdentityResourceGroup }}"
+
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client jq || true
+
+          # Keep public endpoint reachable for pipeline connectivity.
+          az postgres flexible-server update \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --name "${{ inputs.postgresServerName }}" \
+            --public-access Enabled \
+            || true
+
+          # Ensure allow-all firewall rule exists.
+          az postgres flexible-server firewall-rule create \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --server-name "${{ inputs.postgresServerName }}" \
+            --name "AllowAll_all_ips" \
+            --start-ip-address "0.0.0.0" \
+            --end-ip-address "255.255.255.255" \
+            || true
+
+          IDENTITY_INFO=$(az identity show \
+            --name "$IDENTITY_NAME" \
+            --resource-group "$IDENTITY_RG" \
+            --query "{principalId:principalId, clientId:clientId}" -o json)
+
+          PRINCIPAL_ID=$(echo "$IDENTITY_INFO" | jq -r '.principalId')
+
+          SP_APP_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "")
+          if [ -z "$SP_APP_ID" ]; then
+            echo "❌ ERROR: Could not determine service principal app ID"
+            exit 1
+          fi
+
+          OVERRIDE_NAME="${{ inputs.servicePrincipalDisplayNameOverride }}"
+          if [ -n "$OVERRIDE_NAME" ]; then
+            SP_DISPLAY_NAME="$OVERRIDE_NAME"
+          else
+            SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+          fi
+
+          CURRENT_USER="$SP_DISPLAY_NAME"
+
+          export PGPASSWORD
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c "SELECT version();" >/dev/null 2>&1; then
+              echo "✅ Connection successful"
+              break
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              echo "❌ ERROR: Connection failed after retries"
+              exit 1
+            fi
+            sleep 30
+            PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+          done
+
+          for DB_NAME in "$KC_DB_NAME" "$HERMES_DB_NAME" "$PLANA_DB_NAME" "$UZERCHE_DB_NAME"; do
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || \
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "CREATE DATABASE $DB_NAME;"
+          done
+
+          ROLE_EXISTS=$(psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -t -c \
+            "SELECT 1 FROM pgaadauth_list_principals(false) WHERE objectid = '$PRINCIPAL_ID';" 2>/dev/null | tr -d ' ' || echo "0")
+
+          if [ "$ROLE_EXISTS" != "1" ]; then
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "SELECT * FROM pgaadauth_create_principal_with_oid('$IDENTITY_NAME', '$PRINCIPAL_ID', 'service', false, false);"
+          fi
+
+          ROLE_NAME="$IDENTITY_NAME"
+
+          for DB_NAME in "$KC_DB_NAME" "$HERMES_DB_NAME" "$PLANA_DB_NAME" "$UZERCHE_DB_NAME"; do
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "GRANT CONNECT ON DATABASE $DB_NAME TO \"$ROLE_NAME\";"
+
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -c \
+              "GRANT USAGE, CREATE ON SCHEMA public TO \"$ROLE_NAME\"; \
+              GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"$ROLE_NAME\"; \
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"$ROLE_NAME\"; \
+              GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"$ROLE_NAME\"; \
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \"$ROLE_NAME\";"
+
+            PRIV_CHECK=$(psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -t -A -c \
+              "SELECT has_schema_privilege('$ROLE_NAME', 'public', 'USAGE') AND has_schema_privilege('$ROLE_NAME', 'public', 'CREATE');")
+
+            if [ "$PRIV_CHECK" != "t" ]; then
+              echo "❌ ERROR: Role '$ROLE_NAME' is missing required schema permissions on public in database '$DB_NAME'"
+              psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -c \
+                "SELECT '$ROLE_NAME' AS role_name, '$DB_NAME' AS database_name, has_schema_privilege('$ROLE_NAME', 'public', 'USAGE') AS has_usage, has_schema_privilege('$ROLE_NAME', 'public', 'CREATE') AS has_create;"
+              exit 1
+            fi
+          done
+
+          echo "✅ PostgreSQL configured for Entra ID managed identity auth"
+
+
+      - task: AzureCLI@2
+        displayName: "Create PostGIS Extension in Plana DB"
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnectionName }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euxo pipefail
+
+            PG_SERVER="${{ parameters.postgresServerName }}"
+            PG_HOST="$PG_SERVER.postgres.database.azure.com"
+            PLANA_DB_NAME="plana"
+
+            OVERRIDE_NAME="${{ parameters.servicePrincipalDisplayNameOverride }}"
+            if [ -n "$OVERRIDE_NAME" ]; then
+              SP_DISPLAY_NAME="$OVERRIDE_NAME"
+            else
+              SP_APP_ID=$(az account show --query user.name -o tsv)
+              SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+            fi
+
+            export PGPASSWORD
+            PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+
+            IDENTITY_NAME="${{ parameters.keycloakManagedIdentityName }}"
+
+            psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
+              "CREATE EXTENSION IF NOT EXISTS postgis; \
+               GRANT azure_pg_admin TO \"$IDENTITY_NAME\";"
+
+            echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in plana database"
+
+      - task: AzureCLI@2
+        displayName: "Store Keycloak DB Config in Key Vault"
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnectionName }}
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            set -euxo pipefail
+
+            KC_DB_NAME="keycloak"
+            IDENTITY_NAME="${{ parameters.keycloakManagedIdentityName }}"
+            PG_SERVER="${{ parameters.postgresServerName }}"
+            KV_NAME="${{ parameters.keyVaultName }}"
+
+            SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
+            KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
+
+            set_secret_with_retry() {
+              local secret_name="$1"
+              local secret_value="$2"
+              local attempt=1
+              local max_attempts=20
+              local delay_seconds=30
+
+              while [ "$attempt" -le "$max_attempts" ]; do
+                if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" >/dev/null 2>&1; then
+                  echo "✅ Secret set: $secret_name"
+                  return 0
+                fi
+
+                echo "⚠️ Failed to set '$secret_name' (attempt $attempt/$max_attempts)."
+                if [ "$attempt" -lt "$max_attempts" ]; then
+                  echo "Waiting ${delay_seconds}s for RBAC propagation..."
+                  sleep "$delay_seconds"
+                fi
+                attempt=$((attempt + 1))
+              done
+
+              echo "❌ Unable to set secret '$secret_name' after $max_attempts attempts"
+              return 1
+            }
+
+            # Retry writes to handle role-assignment propagation delays.
+            set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME" || true
+            set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com" || true
+            set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME" || true
+            set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME" || true
+
+            # Final verification pass to ensure each secret exists.
+            for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
+              if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
+                echo "❌ Secret missing after retries: $s"
+                echo "Caller object ID (from current az context): $SP_OBJECT_ID"
+                echo "Key Vault scope: $KV_ID"
+                echo "Expected RBAC role: Key Vault Secrets Officer (b86a8fe4-44ce-4948-aee5-eccb2c155cd7)"
+                echo ""
+                echo "Role assignments currently visible for caller at vault scope:"
+                az role assignment list --assignee "$SP_OBJECT_ID" --scope "$KV_ID" --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+                exit 1
+              fi
+            done
+
+            echo "✅ Keycloak DB config stored in Key Vault"
