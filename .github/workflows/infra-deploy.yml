@@ -41,6 +41,7 @@ jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
     if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
+    environment: development
     uses: ./.github/workflows/templates/deploy-bicep.yml
     with:
       location: ${{ github.event.inputs.location }}
@@ -57,7 +58,7 @@ jobs:
     name: Deploy Infrastructure (Resource Group Scope)
     if: ${{ github.event.inputs.deploymentScope == 'resourceGroup' }}
     runs-on: ubuntu-latest
-    steps:
+    environment: development
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,6 +95,7 @@ jobs:
   lockdown-postgresql:
     name: Lockdown PostgreSQL (Entra ID Only)
     if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
+    environment: development
     needs: 
       - deploy-subscription-scope
       - deploy-resource-group-scope
