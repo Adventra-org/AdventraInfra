@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "4078781918960291643"
+      "templateHash": "2002577340327946919"
     }
   },
   "parameters": {
@@ -38,6 +38,13 @@
       "maxLength": 8,
       "metadata": {
         "description": "Project short name used in resource naming."
+      }
+    },
+    "keyVaultNameSalt": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional salt appended to Key Vault name generation. Use for dev to avoid soft-delete tombstone name collisions."
       }
     },
     "rustApiContainerImage": {
@@ -159,7 +166,8 @@
     "storageAccountName": "[toLower(format('st{0}{1}{2}', take(replace(parameters('projectName'), '-', ''), 8), parameters('environmentName'), take(uniqueString(variables('resourceGroupId')), 8)))]",
     "logAnalyticsName": "[format('{0}-law', variables('baseName'))]",
     "appInsightsName": "[format('{0}-appi', variables('baseName'))]",
-    "keyVaultName": "[take(toLower(format('{0}-kv-{1}', variables('baseName'), uniqueString(variables('resourceGroupId')))), 24)]",
+    "keyVaultNameSeed": "[if(empty(parameters('keyVaultNameSalt')), uniqueString(variables('resourceGroupId')), uniqueString(variables('resourceGroupId'), parameters('keyVaultNameSalt')))]",
+    "keyVaultName": "[take(toLower(format('{0}-kv-{1}', variables('baseName'), variables('keyVaultNameSeed'))), 24)]",
     "userAssignedIdentityName": "[format('{0}-uami', variables('baseName'))]",
     "containerAppsEnvName": "[format('{0}-cae', variables('baseName'))]",
     "postgresServerName": "[format('{0}-pg-{1}', variables('baseName'), uniqueString(variables('resourceGroupId')))]",

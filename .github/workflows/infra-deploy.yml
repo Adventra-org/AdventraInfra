@@ -62,6 +62,11 @@ jobs:
           DEPLOYMENT_NAME="adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}"
           TEMPLATE_FILE="bicep/main.bicep"
           PARAMS_FILE="bicep/parameters/${{ github.event.inputs.environment }}.bicepparam"
+          KEYVAULT_NAME_SALT=""
+
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            KEYVAULT_NAME_SALT="run-${{ github.run_number }}"
+          fi
 
           echo "Deploying subscription scope Bicep"
           echo "Deployment name: $DEPLOYMENT_NAME"
@@ -74,6 +79,7 @@ jobs:
             --template-file "$TEMPLATE_FILE" \
             --parameters "$PARAMS_FILE" \
             --parameters postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+            --parameters keyVaultNameSalt="$KEYVAULT_NAME_SALT" \
             --only-show-errors
 
   lockdown-postgresql:

@@ -17,6 +17,9 @@ param location string
 @maxLength(8)
 param projectName string = 'ar'
 
+@description('Optional salt appended to Key Vault name generation. Use for dev to avoid soft-delete tombstone name collisions.')
+param keyVaultNameSalt string = ''
+
 @description('Container image for the Rust API in Container Apps.')
 param rustApiContainerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -81,7 +84,8 @@ var baseName = '${projectName}-${environmentName}'
 var storageAccountName = toLower('st${take(replace(projectName, '-', ''), 8)}${environmentName}${take(uniqueString(resourceGroupId), 8)}')
 var logAnalyticsName = '${baseName}-law'
 var appInsightsName = '${baseName}-appi'
-var keyVaultName = take(toLower('${baseName}-kv-${uniqueString(resourceGroupId)}'), 24)
+var keyVaultNameSeed = empty(keyVaultNameSalt) ? uniqueString(resourceGroupId) : uniqueString(resourceGroupId, keyVaultNameSalt)
+var keyVaultName = take(toLower('${baseName}-kv-${keyVaultNameSeed}'), 24)
 var userAssignedIdentityName = '${baseName}-uami'
 var containerAppsEnvName = '${baseName}-cae'
 var postgresServerName = '${baseName}-pg-${uniqueString(resourceGroupId)}'
