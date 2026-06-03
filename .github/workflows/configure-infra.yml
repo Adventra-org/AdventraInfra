@@ -1,34 +1,30 @@
-name: Configure PostgreSQL
+name: Configure Infra
 
 on:
-  workflow_call:
-    inputs:
-      resourceGroup:
-        required: true
-        type: string
-      keyVaultName:
-        required: true
-        type: string
-      postgresServerName:
-        required: true
-        type: string
-      keycloakManagedIdentityName:
-        required: true
-        type: string
-      keycloakManagedIdentityResourceGroup:
-        required: true
-        type: string
-      servicePrincipalDisplayNameOverride:
-        required: false
-        type: string
-        default: ''
-    secrets:
-      AZURE_CLIENT_ID:
-        required: true
-      AZURE_TENANT_ID:
-        required: true
-      AZURE_SUBSCRIPTION_ID:
-        required: true
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'keycloak/**'
+      - '.github/workflows/configure-infra.yml'
+  workflow_dispatch:
+
+env:
+  subscriptionId: '9ab32d5c-5f7a-413a-b251-8598b4546692'
+  resourceGroupName: 'adventra-dev'
+  keyVaultName: 'cpkvdev'
+  postgresServerName: 'cppgsrvdev'
+  keycloakManagedIdentityName: 'cpdpuamidev'
+  keycloakManagedIdentityResourceGroup: 'adventra-dev'
+  servicePrincipalDisplayNameOverride: ''
+  keycloakImageName: 'keycloak'
+  keycloakRealmPasswordSecretName: 'keycloak-client-secret'
+  athensAdminClientSecretName: 'athens-keycloak-admin-client-secret'
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   configure-pgsql:
@@ -53,8 +49,8 @@ jobs:
 
           az postgres flexible-server update \
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            --resource-group "${{ inputs.resourceGroup }}" \
-            --name "${{ inputs.postgresServerName }}" \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name "${{ env.postgresServerName }}" \
             --password-auth Enabled \
             --microsoft-entra-auth Enabled \
             || echo "⚠️ Entra auth may already be enabled"
@@ -71,16 +67,16 @@ jobs:
           SP_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
 
           CURRENT_ADMINS=$(az postgres flexible-server microsoft-entra-admin list \
-            --resource-group "${{ inputs.resourceGroup }}" \
-            --server-name "${{ inputs.postgresServerName }}" \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --server-name "${{ env.postgresServerName }}" \
             --query "[].{objectId:objectId, name:principalName}" -o json 2>/dev/null || echo "[]")
 
           ADMIN_EXISTS=$(echo "$CURRENT_ADMINS" | jq -r --arg oid "$SP_OBJECT_ID" '.[] | select(.objectId==$oid) | .objectId' || echo "")
 
           if [ -z "$ADMIN_EXISTS" ]; then
             az postgres flexible-server microsoft-entra-admin create \
-              --resource-group "${{ inputs.resourceGroup }}" \
-              --server-name "${{ inputs.postgresServerName }}" \
+              --resource-group "${{ env.resourceGroupName }}" \
+              --server-name "${{ env.postgresServerName }}" \
               --object-id "$SP_OBJECT_ID" \
               --display-name "$SP_NAME" \
               --type ServicePrincipal
@@ -96,29 +92,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          PG_SERVER="${{ inputs.postgresServerName }}"
+          PG_SERVER="${{ env.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           KC_DB_NAME="keycloak"
           HERMES_DB_NAME="hermes"
           PLANA_DB_NAME="plana"
           UZERCHE_DB_NAME="uzerche"
-          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
-          IDENTITY_RG="${{ inputs.keycloakManagedIdentityResourceGroup }}"
+          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
+          IDENTITY_RG="${{ env.keycloakManagedIdentityResourceGroup }}"
 
           sudo apt-get update -y
           sudo apt-get install -y postgresql-client jq || true
 
-          # Keep public endpoint reachable for pipeline connectivity.
           az postgres flexible-server update \
-            --resource-group "${{ inputs.resourceGroup }}" \
-            --name "${{ inputs.postgresServerName }}" \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name "${{ env.postgresServerName }}" \
             --public-access Enabled \
             || true
 
-          # Ensure allow-all firewall rule exists.
           az postgres flexible-server firewall-rule create \
-            --resource-group "${{ inputs.resourceGroup }}" \
-            --server-name "${{ inputs.postgresServerName }}" \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --server-name "${{ env.postgresServerName }}" \
             --name "AllowAll_all_ips" \
             --start-ip-address "0.0.0.0" \
             --end-ip-address "255.255.255.255" \
@@ -137,7 +131,7 @@ jobs:
             exit 1
           fi
 
-          OVERRIDE_NAME="${{ inputs.servicePrincipalDisplayNameOverride }}"
+          OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
           if [ -n "$OVERRIDE_NAME" ]; then
             SP_DISPLAY_NAME="$OVERRIDE_NAME"
           else
@@ -211,11 +205,11 @@ jobs:
         run: |
           set -euxo pipefail
 
-          PG_SERVER="${{ inputs.postgresServerName }}"
+          PG_SERVER="${{ env.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           PLANA_DB_NAME="plana"
 
-          OVERRIDE_NAME="${{ inputs.servicePrincipalDisplayNameOverride }}"
+          OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
           if [ -n "$OVERRIDE_NAME" ]; then
             SP_DISPLAY_NAME="$OVERRIDE_NAME"
           else
@@ -226,7 +220,7 @@ jobs:
           export PGPASSWORD
           PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
 
-          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
+          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
 
           psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
             "CREATE EXTENSION IF NOT EXISTS postgis; \
@@ -240,9 +234,9 @@ jobs:
           set -euxo pipefail
 
           KC_DB_NAME="keycloak"
-          IDENTITY_NAME="${{ inputs.keycloakManagedIdentityName }}"
-          PG_SERVER="${{ inputs.postgresServerName }}"
-          KV_NAME="${{ inputs.keyVaultName }}"
+          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
+          PG_SERVER="${{ env.postgresServerName }}"
+          KV_NAME="${{ env.keyVaultName }}"
 
           SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
           KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
@@ -272,13 +266,11 @@ jobs:
             return 1
           }
 
-          # Retry writes to handle role-assignment propagation delays.
           set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME" || true
           set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com" || true
           set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME" || true
           set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME" || true
 
-          # Final verification pass to ensure each secret exists.
           for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
             if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "❌ Secret missing after retries: $s"
@@ -293,3 +285,106 @@ jobs:
           done
 
           echo "✅ Keycloak DB config stored in Key Vault"
+
+  build-and-push-keycloak:
+    name: Build and Push Keycloak Image
+    needs: configure-pgsql
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.subscriptionId }}
+
+      - name: Discover ACR and Login
+        shell: bash
+        run: |
+          ACR_NAME=$(az acr list --resource-group ${{ env.resourceGroupName }} --query "[0].name" -o tsv)
+
+          if [ -z "$ACR_NAME" ]; then
+            echo "❌ Error: No Azure Container Registry found in resource group ${{ env.resourceGroupName }}"
+            exit 1
+          fi
+
+          echo "Found ACR: $ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+
+          az acr login --name $ACR_NAME
+
+      - name: Generate password, store in Key Vault, and patch realm JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KV_NAME='${{ env.keyVaultName }}'
+          SECRET_NAME='${{ env.keycloakRealmPasswordSecretName }}'
+          REALM_FILE='keycloak/cpln-realm.json'
+
+          if [ ! -f "$REALM_FILE" ]; then
+            echo "❌ Realm file not found: $REALM_FILE"
+            exit 1
+          fi
+
+          REALM_PASSWORD=$(openssl rand -hex 24)
+
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name "$SECRET_NAME" \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name '${{ env.athensAdminClientSecretName }}' \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          placeholders_before=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$placeholders_before" = "0" ]; then
+            echo "❌ No '[PASSWORD GOES HERE]' placeholders found in $REALM_FILE"
+            exit 1
+          fi
+
+          sed -i.bak "s/\[PASSWORD GOES HERE\]/${REALM_PASSWORD}/g" "$REALM_FILE"
+          rm -f "${REALM_FILE}.bak"
+
+          remaining=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$remaining" != "0" ]; then
+            echo "❌ Placeholder replacement incomplete in $REALM_FILE"
+            exit 1
+          fi
+
+          echo "✅ Secret rotated in Key Vault and replaced ${placeholders_before} placeholders in realm JSON"
+
+      - name: Build and Push Keycloak Image
+        shell: bash
+        run: |
+          ACR_URI=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
+
+          if [ -z "$ACR_URI" ]; then
+            echo "❌ Error: Failed to get ACR URI for $ACR_NAME"
+            exit 1
+          fi
+
+          echo "Building Keycloak image: ${ACR_URI}/${{ env.keycloakImageName }}:${{ github.run_number }}"
+          echo "Current directory: $(pwd)"
+          ls -la keycloak/ || echo "Cannot list keycloak/"
+
+          az acr build --registry $ACR_NAME \
+            --image "${{ env.keycloakImageName }}:${{ github.run_number }}" \
+            --image "${{ env.keycloakImageName }}:latest" \
+            --file keycloak/Dockerfile \
+            .
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Image pushed successfully to ACR: ${ACR_URI}/${{ env.keycloakImageName }}:latest"
+          else
+            echo "❌ Failed to build and/or push image to ACR"
+            exit 1
+          fi

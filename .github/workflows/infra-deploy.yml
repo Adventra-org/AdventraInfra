@@ -1,4 +1,4 @@
-name: Adventra Infrastructure Deployment
+name: Infra Deploy
 
 on:
   workflow_dispatch:
@@ -48,6 +48,29 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Service Principal Permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking service principal permissions..."
+
+          SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+          SP_OBJECT_ID=$(az account show --query user.name -o tsv)
+
+          ROLE_ASSIGNMENTS=$(az role assignment list \
+            --assignee "$SP_OBJECT_ID" \
+            --scope "/subscriptions/$SUBSCRIPTION_ID" \
+            --query "[?roleDefinitionName=='User Access Administrator' || roleDefinitionName=='Owner'].roleDefinitionName" \
+            -o tsv)
+
+          if echo "$ROLE_ASSIGNMENTS" | grep -qE "User Access Administrator|Owner"; then
+            echo "Service principal has required permissions to assign roles"
+          else
+            echo "WARNING: Service principal does not have User Access Administrator or Owner role"
+            echo "Role assignments may fail. Grant one of the roles if deployment errors occur."
+          fi
 
       - name: Deploy Bicep to Subscription
         shell: bash
@@ -104,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          RESOURCE_GROUP="${{ github.event.inputs.resourceGroup || 'cprgdev' }}"
+          RESOURCE_GROUP="${{ github.event.inputs.resourceGroup || 'adventra-dev' }}"
           POSTGRES_SERVER="${{ github.event.inputs.postgresServerName }}"
 
           echo "Locking down PostgreSQL server: $POSTGRES_SERVER"
