@@ -11,7 +11,7 @@ SUBSCRIPTION_ID="$1"
 RESOURCE_GROUP="$2"
 ENVIRONMENT="$3"
 POSTGRES_ADMIN_PASSWORD="$4"
-LOCATION="${5:-centralus}"
+LOCATION="${5:-eastus2}"
 
 PARAM_FILE="$(dirname "$0")/../bicep/parameters/${ENVIRONMENT}.bicepparam"
 

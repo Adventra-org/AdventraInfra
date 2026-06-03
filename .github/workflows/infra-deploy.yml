@@ -16,7 +16,7 @@ on:
       location:
         description: Azure region
         required: false
-        default: centralus
+        default: eastus2
       lockdownPostgres:
         description: Lockdown PostgreSQL after deployment (Entra ID only)
         required: false
