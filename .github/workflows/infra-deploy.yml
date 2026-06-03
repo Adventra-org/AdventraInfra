@@ -54,6 +54,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${{ secrets.POSTGRES_ADMIN_PASSWORD }}" ]; then
+            echo "ERROR: Missing required secret POSTGRES_ADMIN_PASSWORD"
+            exit 1
+          fi
+
           DEPLOYMENT_NAME="adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}"
           TEMPLATE_FILE="bicep/main.bicep"
           PARAMS_FILE="bicep/parameters/${{ github.event.inputs.environment }}.bicepparam"
@@ -68,6 +73,7 @@ jobs:
             --location "${{ github.event.inputs.location }}" \
             --template-file "$TEMPLATE_FILE" \
             --parameters "$PARAMS_FILE" \
+            --parameters postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
             --only-show-errors
 
   lockdown-postgresql:
