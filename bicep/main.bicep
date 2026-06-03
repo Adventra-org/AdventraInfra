@@ -1,5 +1,6 @@
-targetScope = 'resourceGroup'
+targetScope = 'subscription'
 
+param resourceGroupName string
 @description('Deployment environment name used for naming and tagging (dev/prod).')
 @allowed([
   'dev'
@@ -51,6 +52,7 @@ var frontDoorOriginName = 'origin-rust-api'
 var frontDoorRouteName = 'route-rust-api'
 
 module logAnalyticsWorkspaceModule './modules/logAnalyticsWorkspace.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'logAnalyticsWorkspaceDeploy'
   params: {
     workspaceName: logAnalyticsName
@@ -60,6 +62,7 @@ module logAnalyticsWorkspaceModule './modules/logAnalyticsWorkspace.bicep' = {
 }
 
 module appInsightsModule './modules/appInsights.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'appInsightsDeploy'
   params: {
     appInsightsName: appInsightsName
@@ -70,6 +73,7 @@ module appInsightsModule './modules/appInsights.bicep' = {
 }
 
 module storageAccountModule './modules/storageAccount.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'storageAccountDeploy'
   params: {
     storageAccountName: storageAccountName
@@ -79,6 +83,7 @@ module storageAccountModule './modules/storageAccount.bicep' = {
 }
 
 module keyVaultModule './modules/keyVault.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'keyVaultDeploy'
   params: {
     keyVaultName: keyVaultName
@@ -89,6 +94,7 @@ module keyVaultModule './modules/keyVault.bicep' = {
 }
 
 module userAssignedIdentityModule './modules/uami.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'uamiDeploy'
   params: {
     identityName: userAssignedIdentityName
@@ -98,6 +104,7 @@ module userAssignedIdentityModule './modules/uami.bicep' = {
 }
 
 module containerAppsEnvironmentModule './modules/containerAppsEnvironment.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'containerAppsEnvironmentDeploy'
   params: {
     environmentName: containerAppsEnvName
@@ -109,6 +116,7 @@ module containerAppsEnvironmentModule './modules/containerAppsEnvironment.bicep'
 }
 
 module postgresqlModule './modules/postgresql.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'postgresqlDeploy'
   params: {
     serverName: postgresServerName
@@ -120,6 +128,7 @@ module postgresqlModule './modules/postgresql.bicep' = {
 }
 
 module containerAppModule './modules/containerApp.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'containerAppDeploy'
   params: {
     appName: rustApiContainerAppName
@@ -138,6 +147,7 @@ module containerAppModule './modules/containerApp.bicep' = {
 }
 
 module frontDoorModule './modules/frontDoor.bicep' = if (deployFrontDoor) {
+  scope: resourceGroup(resourceGroupName)
   name: 'frontDoorDeploy'
   params: {
     profileName: frontDoorProfileName
@@ -151,6 +161,7 @@ module frontDoorModule './modules/frontDoor.bicep' = if (deployFrontDoor) {
 }
 
 module keyVaultSecretsUserRoleAssignmentModule './modules/keyVaultSecretsUserRoleAssignment.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'keyVaultSecretsUserRoleAssignmentDeploy'
   params: {
     keyVaultId: keyVaultModule.outputs.keyVaultId
@@ -160,6 +171,7 @@ module keyVaultSecretsUserRoleAssignmentModule './modules/keyVaultSecretsUserRol
 }
 
 module storageBlobDataContributorRoleAssignmentModule './modules/storageBlobDataContributorRoleAssignment.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'storageBlobDataContributorRoleAssignmentDeploy'
   params: {
     storageAccountId: storageAccountModule.outputs.storageAccountId
@@ -169,6 +181,7 @@ module storageBlobDataContributorRoleAssignmentModule './modules/storageBlobData
 }
 
 module storageDiagnosticsModule './modules/storageDiagnostics.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'storageDiagnosticsDeploy'
   params: {
     storageAccountId: storageAccountModule.outputs.storageAccountId
@@ -177,6 +190,7 @@ module storageDiagnosticsModule './modules/storageDiagnostics.bicep' = {
 }
 
 module keyVaultDiagnosticsModule './modules/keyVaultDiagnostics.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'keyVaultDiagnosticsDeploy'
   params: {
     keyVaultId: keyVaultModule.outputs.keyVaultId
@@ -185,6 +199,7 @@ module keyVaultDiagnosticsModule './modules/keyVaultDiagnostics.bicep' = {
 }
 
 module postgresDiagnosticsModule './modules/postgresDiagnostics.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'postgresDiagnosticsDeploy'
   params: {
     postgresServerId: postgresqlModule.outputs.postgresServerId
@@ -193,6 +208,7 @@ module postgresDiagnosticsModule './modules/postgresDiagnostics.bicep' = {
 }
 
 module containerAppsEnvDiagnosticsModule './modules/containerAppsEnvDiagnostics.bicep' = {
+  scope: resourceGroup(resourceGroupName)
   name: 'containerAppsEnvDiagnosticsDeploy'
   params: {
     containerAppsEnvironmentId: containerAppsEnvironmentModule.outputs.managedEnvironmentId
@@ -201,6 +217,7 @@ module containerAppsEnvDiagnosticsModule './modules/containerAppsEnvDiagnostics.
 }
 
 module frontDoorDiagnosticsModule './modules/frontDoorDiagnostics.bicep' = if (deployFrontDoor) {
+  scope: resourceGroup(resourceGroupName)
   name: 'frontDoorDiagnosticsDeploy'
   params: {
     frontDoorProfileId: frontDoorModule.outputs.frontDoorProfileId

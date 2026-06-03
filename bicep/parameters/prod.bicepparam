@@ -1,5 +1,6 @@
 using '../main.bicep'
 
+param resourceGroupName = 'adventra-prod'
 param environmentName = 'prod'
 param location = 'eastus2'
 param projectName = 'egw'
