@@ -9,7 +9,7 @@ param resourceGroupName string
 param environmentName string
 
 @description('Azure region for regional resources.')
-param location string = resourceGroup().location
+param location string
 
 @description('Project short name used in resource naming.')
 @minLength(2)
@@ -37,14 +37,14 @@ param commonTags object = {
 }
 
 var baseName = '${projectName}-${environmentName}'
-var storageAccountName = toLower('st${take(replace(projectName, '-', ''), 8)}${environmentName}${take(uniqueString(resourceGroup().id), 8)}')
+var storageAccountName = toLower('st${take(replace(projectName, '-', ''), 8)}${environmentName}${take(uniqueString(resourceGroup(resourceGroupName).id), 8)}')
 var logAnalyticsName = '${baseName}-law'
 var appInsightsName = '${baseName}-appi'
-var keyVaultName = take(toLower('${baseName}-kv-${uniqueString(resourceGroup().id)}'), 24)
+var keyVaultName = take(toLower('${baseName}-kv-${uniqueString(resourceGroup(resourceGroupName).id)}'), 24)
 var userAssignedIdentityName = '${baseName}-uami'
 var containerAppsEnvName = '${baseName}-cae'
 var rustApiContainerAppName = '${baseName}-rust-api'
-var postgresServerName = '${baseName}-pg-${uniqueString(resourceGroup().id)}'
+var postgresServerName = '${baseName}-pg-${uniqueString(resourceGroup(resourceGroupName).id)}'
 var frontDoorProfileName = '${baseName}-afd'
 var frontDoorEndpointName = '${baseName}-ep'
 var frontDoorOriginGroupName = 'og-rust-api'
