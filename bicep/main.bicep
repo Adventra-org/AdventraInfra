@@ -37,14 +37,14 @@ param commonTags object = {
 }
 
 var baseName = '${projectName}-${environmentName}'
-var storageAccountName = toLower('st${take(replace(projectName, '-', ''), 8)}${environmentName}${take(uniqueString(resourceGroup(resourceGroupName).id), 8)}')
+var storageAccountName = toLower('st${take(replace(projectName, '-', ''), 8)}${environmentName}${take(uniqueString(subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroupName)), 8)}')
 var logAnalyticsName = '${baseName}-law'
 var appInsightsName = '${baseName}-appi'
-var keyVaultName = take(toLower('${baseName}-kv-${uniqueString(resourceGroup(resourceGroupName).id)}'), 24)
+var keyVaultName = take(toLower('${baseName}-kv-${uniqueString(subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroupName))}'), 24)
 var userAssignedIdentityName = '${baseName}-uami'
 var containerAppsEnvName = '${baseName}-cae'
 var rustApiContainerAppName = '${baseName}-rust-api'
-var postgresServerName = '${baseName}-pg-${uniqueString(resourceGroup(resourceGroupName).id)}'
+var postgresServerName = '${baseName}-pg-${uniqueString(subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroupName))}'
 var frontDoorProfileName = '${baseName}-afd'
 var frontDoorEndpointName = '${baseName}-ep'
 var frontDoorOriginGroupName = 'og-rust-api'
