@@ -1,5 +1,6 @@
 using '../main.bicep'
 
+param subscriptionId = '9ab32d5c-5f7a-413a-b251-8598b4546692'
 param resourceGroupName = 'adventra-prod'
 param environmentName = 'prod'
 param location = 'eastus2'

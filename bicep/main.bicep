@@ -1,5 +1,6 @@
 targetScope = 'subscription'
 
+param subscriptionId string
 param resourceGroupName string
 @description('Deployment environment name used for naming and tagging (dev/prod).')
 @allowed([
@@ -50,6 +51,15 @@ var frontDoorEndpointName = '${baseName}-ep'
 var frontDoorOriginGroupName = 'og-rust-api'
 var frontDoorOriginName = 'origin-rust-api'
 var frontDoorRouteName = 'route-rust-api'
+
+module resourceGroupModule './modules/resrouceGroup.bicep' = {
+  name: 'deployResourceGroup'
+  scope: subscription(subscriptionId)
+  params: {
+    resourceGroupName: resourceGroupName
+    location: location
+  }
+}
 
 module logAnalyticsWorkspaceModule './modules/logAnalyticsWorkspace.bicep' = {
   scope: resourceGroup(resourceGroupName)
