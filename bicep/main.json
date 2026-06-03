@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.39.26.7824",
-      "templateHash": "11300814172423304365"
+      "version": "0.40.2.10011",
+      "templateHash": "17241851626615510271"
     }
   },
   "parameters": {
@@ -197,8 +197,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "5718372358992104290"
+              "version": "0.40.2.10011",
+              "templateHash": "5820673551150713866"
             }
           },
           "parameters": {
@@ -253,8 +253,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "2683307959201301670"
+              "version": "0.40.2.10011",
+              "templateHash": "8405510888234491028"
             }
           },
           "parameters": {
@@ -328,8 +328,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "17769880846464355286"
+              "version": "0.40.2.10011",
+              "templateHash": "11143440915520708102"
             }
           },
           "parameters": {
@@ -400,8 +400,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "7757726083636039128"
+              "version": "0.40.2.10011",
+              "templateHash": "1402246500780806088"
             }
           },
           "parameters": {
@@ -473,6 +473,9 @@
           },
           "tenantId": {
             "value": "[subscription().tenantId]"
+          },
+          "enableSoftDelete": {
+            "value": "[equals(parameters('environmentName'), 'prod')]"
           }
         },
         "template": {
@@ -481,8 +484,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "4110176126500524901"
+              "version": "0.40.2.10011",
+              "templateHash": "6503277272229367935"
             }
           },
           "parameters": {
@@ -497,6 +500,10 @@
             },
             "tenantId": {
               "type": "string"
+            },
+            "enableSoftDelete": {
+              "type": "bool",
+              "defaultValue": true
             }
           },
           "resources": [
@@ -506,20 +513,7 @@
               "name": "[parameters('keyVaultName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
-              "properties": {
-                "tenantId": "[parameters('tenantId')]",
-                "enableRbacAuthorization": true,
-                "enabledForDeployment": false,
-                "enabledForTemplateDeployment": false,
-                "enabledForDiskEncryption": false,
-                "softDeleteRetentionInDays": 90,
-                "enablePurgeProtection": true,
-                "publicNetworkAccess": "Enabled",
-                "sku": {
-                  "name": "standard",
-                  "family": "A"
-                }
-              }
+              "properties": "[union(createObject('tenantId', parameters('tenantId'), 'enableRbacAuthorization', true(), 'enabledForDeployment', false(), 'enabledForTemplateDeployment', false(), 'enabledForDiskEncryption', false(), 'publicNetworkAccess', 'Enabled', 'sku', createObject('name', 'standard', 'family', 'A')), if(parameters('enableSoftDelete'), createObject('enableSoftDelete', true(), 'softDeleteRetentionInDays', 90, 'enablePurgeProtection', true()), createObject('enableSoftDelete', false(), 'enablePurgeProtection', false())))]"
             }
           ],
           "outputs": {
@@ -565,8 +559,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "16072229698434379601"
+              "version": "0.40.2.10011",
+              "templateHash": "14057423905069448403"
             }
           },
           "parameters": {
@@ -636,8 +630,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "16674701342878880909"
+              "version": "0.40.2.10011",
+              "templateHash": "11801321165127272516"
             }
           },
           "parameters": {
@@ -724,8 +718,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "5302337957366101993"
+              "version": "0.40.2.10011",
+              "templateHash": "1234489053570981497"
             }
           },
           "parameters": {
@@ -791,8 +785,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "5644051824598609400"
+              "version": "0.40.2.10011",
+              "templateHash": "13823294628190922124"
             }
           },
           "parameters": {
@@ -877,8 +871,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "3309777120271341627"
+              "version": "0.40.2.10011",
+              "templateHash": "16464230623030487870"
             }
           },
           "parameters": {
@@ -989,8 +983,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "17587510052149497321"
+              "version": "0.40.2.10011",
+              "templateHash": "6005272036202573998"
             }
           },
           "parameters": {
@@ -1018,7 +1012,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.DBforPostgreSQL/flexibleServers/{0}', last(split(parameters('postgresqlServerId'), '/')))]",
+              "scope": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', last(split(parameters('postgresqlServerId'), '/')))]",
               "name": "[guid(parameters('postgresqlServerId'), parameters('principalId'), parameters('roleDefinitionId'))]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('roleDefinitionId'))]",
@@ -1073,8 +1067,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "9391773938454837418"
+              "version": "0.40.2.10011",
+              "templateHash": "14264592342989440617"
             }
           },
           "parameters": {
@@ -1221,8 +1215,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "7080937623255437817"
+              "version": "0.40.2.10011",
+              "templateHash": "347821080471077180"
             }
           },
           "parameters": {
@@ -1341,8 +1335,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "9011150224182430335"
+              "version": "0.40.2.10011",
+              "templateHash": "8036962759416625199"
             }
           },
           "parameters": {
@@ -1370,7 +1364,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.CognitiveServices/accounts/{0}', parameters('accountName'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]",
               "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName')), parameters('principalId'), parameters('roleDefinitionId'))]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('roleDefinitionId'))]",
@@ -1422,8 +1416,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "15855111600603665654"
+              "version": "0.40.2.10011",
+              "templateHash": "4250906608029159039"
             }
           },
           "parameters": {
@@ -1444,7 +1438,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.KeyVault/vaults/{0}', last(split(parameters('keyVaultId'), '/')))]",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', last(split(parameters('keyVaultId'), '/')))]",
               "name": "[guid(parameters('keyVaultId'), parameters('principalResourceId'), variables('keyVaultSecretsUserRoleDefinitionId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
@@ -1488,8 +1482,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "3551847664353552793"
+              "version": "0.40.2.10011",
+              "templateHash": "15541659289432378758"
             }
           },
           "parameters": {
@@ -1510,7 +1504,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', last(split(parameters('storageAccountId'), '/')))]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', last(split(parameters('storageAccountId'), '/')))]",
               "name": "[guid(parameters('storageAccountId'), parameters('principalResourceId'), variables('storageBlobDataContributorRoleDefinitionId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
@@ -1567,8 +1561,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "12742423465665557082"
+              "version": "0.40.2.10011",
+              "templateHash": "3877223401603273109"
             }
           },
           "parameters": {
@@ -1761,8 +1755,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "1509453482657857974"
+              "version": "0.40.2.10011",
+              "templateHash": "11003514243216570877"
             }
           },
           "parameters": {
@@ -1916,8 +1910,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "11165234306045885902"
+              "version": "0.40.2.10011",
+              "templateHash": "18241983248255865035"
             }
           },
           "parameters": {
@@ -1932,7 +1926,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', last(split(parameters('storageAccountId'), '/')))]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', last(split(parameters('storageAccountId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -1991,8 +1985,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "11600139122424116715"
+              "version": "0.40.2.10011",
+              "templateHash": "10384806367650438512"
             }
           },
           "parameters": {
@@ -2007,7 +2001,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[format('Microsoft.KeyVault/vaults/{0}', last(split(parameters('keyVaultId'), '/')))]",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', last(split(parameters('keyVaultId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2058,8 +2052,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "15259535996633557613"
+              "version": "0.40.2.10011",
+              "templateHash": "5033297993726591538"
             }
           },
           "parameters": {
@@ -2074,7 +2068,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[format('Microsoft.DBforPostgreSQL/flexibleServers/{0}', last(split(parameters('postgresServerId'), '/')))]",
+              "scope": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', last(split(parameters('postgresServerId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2125,8 +2119,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "15111028948296754803"
+              "version": "0.40.2.10011",
+              "templateHash": "1621653967312560247"
             }
           },
           "parameters": {
@@ -2141,7 +2135,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[format('Microsoft.App/managedEnvironments/{0}', last(split(parameters('containerAppsEnvironmentId'), '/')))]",
+              "scope": "[resourceId('Microsoft.App/managedEnvironments', last(split(parameters('containerAppsEnvironmentId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2193,8 +2187,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.39.26.7824",
-              "templateHash": "10434487255100506311"
+              "version": "0.40.2.10011",
+              "templateHash": "15375569952048653866"
             }
           },
           "parameters": {
@@ -2209,7 +2203,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[format('Microsoft.Cdn/profiles/{0}', last(split(parameters('frontDoorProfileId'), '/')))]",
+              "scope": "[resourceId('Microsoft.Cdn/profiles', last(split(parameters('frontDoorProfileId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",

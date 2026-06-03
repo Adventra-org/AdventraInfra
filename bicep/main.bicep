@@ -145,6 +145,7 @@ module keyVaultModule './modules/keyVault.bicep' = {
     location: location
     tags: commonTags
     tenantId: subscription().tenantId
+    enableSoftDelete: environmentName == 'prod'
   }
 }
 
