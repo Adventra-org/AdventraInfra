@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "5705939047982231721"
+      "templateHash": "4078781918960291643"
     }
   },
   "parameters": {
@@ -485,7 +485,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "6503277272229367935"
+              "templateHash": "17546183448866915438"
             }
           },
           "parameters": {
@@ -513,7 +513,7 @@
               "name": "[parameters('keyVaultName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
-              "properties": "[union(createObject('tenantId', parameters('tenantId'), 'enableRbacAuthorization', true(), 'enabledForDeployment', false(), 'enabledForTemplateDeployment', false(), 'enabledForDiskEncryption', false(), 'publicNetworkAccess', 'Enabled', 'sku', createObject('name', 'standard', 'family', 'A')), if(parameters('enableSoftDelete'), createObject('enableSoftDelete', true(), 'softDeleteRetentionInDays', 90, 'enablePurgeProtection', true()), createObject('enableSoftDelete', false(), 'enablePurgeProtection', false())))]"
+              "properties": "[union(createObject('tenantId', parameters('tenantId'), 'enableRbacAuthorization', true(), 'enabledForDeployment', false(), 'enabledForTemplateDeployment', false(), 'enabledForDiskEncryption', false(), 'publicNetworkAccess', 'Enabled', 'sku', createObject('name', 'standard', 'family', 'A')), if(parameters('enableSoftDelete'), createObject('enableSoftDelete', true(), 'softDeleteRetentionInDays', 90), createObject('enableSoftDelete', false())))]"
             }
           ],
           "outputs": {
