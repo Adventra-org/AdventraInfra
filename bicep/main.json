@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "3279825361248319733"
+      "templateHash": "16366674199280467495"
     }
   },
   "parameters": {
@@ -121,6 +121,17 @@
       "defaultValue": "2024-07-18",
       "metadata": {
         "description": "Azure OpenAI model version."
+      }
+    },
+    "openAiDeploymentSku": {
+      "type": "string",
+      "defaultValue": "GlobalStandard",
+      "allowedValues": [
+        "Standard",
+        "GlobalStandard"
+      ],
+      "metadata": {
+        "description": "Azure OpenAI deployment SKU."
       }
     },
     "postgresqlRoleDefinitionId": {
@@ -1198,7 +1209,7 @@
             "value": "[parameters('openAiModelVersion')]"
           },
           "skuName": {
-            "value": "Standard"
+            "value": "[parameters('openAiDeploymentSku')]"
           },
           "capacity": {
             "value": 120

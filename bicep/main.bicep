@@ -15,7 +15,7 @@ param location string
 @description('Project short name used in resource naming.')
 @minLength(2)
 @maxLength(8)
-param projectName string = 'egw'
+param projectName string = 'ar'
 
 @description('Container image for the Rust API in Container Apps.')
 param rustApiContainerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -59,12 +59,19 @@ param openAiModelName string = 'gpt-4o-mini'
 @description('Azure OpenAI model version.')
 param openAiModelVersion string = '2024-07-18'
 
+@description('Azure OpenAI deployment SKU.')
+@allowed([
+  'Standard'
+  'GlobalStandard'
+])
+param openAiDeploymentSku string = 'GlobalStandard'
+
 @description('Role definition ID for PostgreSQL scope assignment. Defaults to Contributor.')
 param postgresqlRoleDefinitionId string = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
 
 @description('Tags applied to all supported resources.')
 param commonTags object = {
-  workload: 'egw'
+  workload: 'ar'
   environment: environmentName
   managedBy: 'bicep'
 }
@@ -233,7 +240,7 @@ module openAiDeploymentModule './modules/openaiDeployment.bicep' = {
     deploymentName: openAiDeploymentName
     modelName: openAiModelName
     modelVersion: openAiModelVersion
-    skuName: 'Standard'
+    skuName: openAiDeploymentSku
     capacity: 120
   }
 }
