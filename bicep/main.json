@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "16366674199280467495"
+      "templateHash": "11300814172423304365"
     }
   },
   "parameters": {
@@ -33,7 +33,7 @@
     },
     "projectName": {
       "type": "string",
-      "defaultValue": "egw",
+      "defaultValue": "ar",
       "minLength": 2,
       "maxLength": 8,
       "metadata": {
@@ -144,7 +144,7 @@
     "commonTags": {
       "type": "object",
       "defaultValue": {
-        "workload": "egw",
+        "workload": "ar",
         "environment": "[parameters('environmentName')]",
         "managedBy": "bicep"
       },
@@ -163,7 +163,7 @@
     "userAssignedIdentityName": "[format('{0}-uami', variables('baseName'))]",
     "containerAppsEnvName": "[format('{0}-cae', variables('baseName'))]",
     "postgresServerName": "[format('{0}-pg-{1}', variables('baseName'), uniqueString(variables('resourceGroupId')))]",
-    "acrName": "[take(toLower(format('{0}acr{1}', variables('baseName'), take(uniqueString(variables('resourceGroupId')), 6))), 50)]",
+    "acrName": "[take(toLower(format('{0}acr{1}', replace(variables('baseName'), '-', ''), take(uniqueString(variables('resourceGroupId')), 6))), 50)]",
     "openAiAccountName": "[take(toLower(format('{0}aoai{1}', variables('baseName'), take(uniqueString(variables('resourceGroupId')), 6))), 64)]",
     "frontDoorProfileName": "[format('{0}-afd', variables('baseName'))]",
     "frontDoorEndpointName": "[format('{0}-ep', variables('baseName'))]",
@@ -1917,7 +1917,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "15215964213254360743"
+              "templateHash": "11165234306045885902"
             }
           },
           "parameters": {
@@ -1938,7 +1938,15 @@
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
                 "logs": [
                   {
-                    "categoryGroup": "allLogs",
+                    "category": "StorageRead",
+                    "enabled": true
+                  },
+                  {
+                    "category": "StorageWrite",
+                    "enabled": true
+                  },
+                  {
+                    "category": "StorageDelete",
                     "enabled": true
                   }
                 ],
