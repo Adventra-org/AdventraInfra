@@ -10,15 +10,8 @@ on:
         options:
           - dev
           - prod
-      deploymentScope:
-        description: Deployment scope
-        required: true
-        type: choice
-        default: subscription
-        options:
-          - subscription
       resourceGroup:
-        description: Target resource group (for resourceGroup scope)
+        description: PostgreSQL resource group (used only when lockdownPostgres is true)
         required: false
       location:
         description: Azure region
@@ -43,7 +36,6 @@ permissions:
 jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
-    if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
     runs-on: ubuntu-latest
     environment: development
     steps:
@@ -78,50 +70,10 @@ jobs:
             --parameters "$PARAMS_FILE" \
             --only-show-errors
 
-  deploy-resource-group-scope:
-    name: Deploy Infrastructure (Resource Group Scope)
-    if: ${{ github.event.inputs.deploymentScope == 'resourceGroup' }}
-    runs-on: ubuntu-latest
-    environment: development
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Ensure resource group
-        run: |
-          az group create \
-            --name "${{ github.event.inputs.resourceGroup }}" \
-            --location "${{ github.event.inputs.location }}"
-
-      - name: Validate Bicep
-        run: |
-          az deployment group validate \
-            --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file bicep/main.bicep \
-            --parameters bicep/parameters/${{ github.event.inputs.environment }}.bicepparam
-
-      - name: Deploy Bicep
-        run: |
-          az deployment group create \
-            --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file bicep/main.bicep \
-            --parameters bicep/parameters/${{ github.event.inputs.environment }}.bicepparam \
-            --query "properties.outputs" \
-            --output jsonc
-
   lockdown-postgresql:
     name: Lockdown PostgreSQL (Entra ID Only)
     if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
-    needs: 
-      - deploy-subscription-scope
-      - deploy-resource-group-scope
+    needs: deploy-subscription-scope
     runs-on: ubuntu-latest
     environment: development
     steps:
