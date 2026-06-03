@@ -1,97 +1,152 @@
-param appName string
-param location string
-param tags object
-param managedEnvironmentId string
-param identityId string
-param containerImage string
-param environmentName string
-param appInsightsConnectionString string
-param databaseHost string
-param databaseName string
-param databaseUser string
-@secure()
-param databasePassword string
 
-resource rustApiContainerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: appName
+param app object
+param location string
+param managedEnvironment string
+param userManagedIdentity string
+param userManagedIdentityClientId string
+param acrUri string
+
+// Conditionally build volume mounts if azureFilesMount is defined
+var hasAzureFilesMount = contains(app, 'azureFilesMount') && !empty(app.azureFilesMount)
+
+var volumeMounts = hasAzureFilesMount ? [
+  {
+    volumeName: app.azureFilesMount.volumeName
+    mountPath: app.azureFilesMount.mountPath
+  }
+] : []
+
+var volumes = hasAzureFilesMount ? [
+  {
+    name: app.azureFilesMount.volumeName
+    storageType: 'AzureFile'
+    storageName: app.azureFilesMount.storageName
+  }
+] : []
+
+// Conditionally build secrets array if secrets are defined
+var secrets = [for secret in (app.?secrets ?? []): {
+  name: secret.name
+  keyVaultUrl: secret.keyVaultUrl
+  identity: secret.?identity ?? userManagedIdentity
+}]
+
+var probeConfig = [
+  {
+    type: 'Startup'
+    httpGet: {
+      path: app.StartupProbePath
+      port: app.startupProbePort
+      scheme: 'HTTP'
+    }
+    initialDelaySeconds: app.startupProbeInitialDelaySeconds
+    periodSeconds: app.startupProbePeriodSeconds
+    timeoutSeconds: app.startupProbeTimeoutSeconds
+    successThreshold: app.startupProbeSuccessThreshold
+    failureThreshold: app.startupProbeFailureThreshold
+  }
+  {
+    type: 'Readiness'
+    httpGet: {
+      path: app.readinessProbePath
+      port: app.readinessProbePort
+      scheme: 'HTTP'
+    }
+    initialDelaySeconds: app.readinessProbeInitialDelaySeconds
+    periodSeconds: app.readinessProbePeriodSeconds
+    timeoutSeconds: app.readinessProbeTimeoutSeconds
+    successThreshold: app.readinessProbeSuccessThreshold
+    failureThreshold: app.readinessProbeFailureThreshold
+  }
+  {
+    type: 'Liveness'
+    httpGet: {
+      path: app.livenessProbePath
+      port: app.livenessProbePort
+      scheme: 'HTTP'
+    }
+    initialDelaySeconds: app.livenessProbeInitialDelaySeconds
+    periodSeconds: app.livenessProbePeriodSeconds
+    timeoutSeconds: app.livenessProbeTimeoutSeconds
+    successThreshold: app.livenessProbeSuccessThreshold
+    failureThreshold: app.livenessProbeFailureThreshold
+  }
+]
+
+// Inject the deployed UAMI client ID for Azure SDK credential resolution.
+var resolvedEnv = concat(app.?env ?? [], [
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: userManagedIdentityClientId
+  }
+])
+
+resource containerAppModule 'Microsoft.App/containerApps@2024-03-01' = {
+  name: app.appName
   location: location
-  tags: tags
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
-      '${identityId}': {}
+      '${userManagedIdentity}': {}
     }
   }
   properties: {
-    managedEnvironmentId: managedEnvironmentId
+    environmentId: managedEnvironment
     configuration: {
-      activeRevisionsMode: 'Single'
+      activeRevisionsMode: app.activeRevisionsMode
       ingress: {
         external: true
-        targetPort: 8080
+        targetPort: app.targetPort
         allowInsecure: false
-        transport: 'auto'
         traffic: [
           {
-            latestRevision: true
             weight: 100
+            latestRevision: true
           }
         ]
+        customDomains: app.customDomain ? [
+          {
+            bindingType: app.bindingType
+            certificateId: 'string'
+            name: app.domainName
+          }
+        ] : null
       }
-      secrets: [
+      dapr: app.daprEnabled ? {
+        appId: app.appName
+        appPort: app.targetPort
+        appProtocol: 'http'
+        enableApiLogging: true
+        enabled: app.daprEnabled
+        logLevel: 'info'
+      } : null
+      registries: [
         {
-          name: 'postgres-password'
-          value: databasePassword
+          identity: userManagedIdentity
+          server: acrUri
         }
       ]
+      secrets: !empty(secrets) ? secrets : null
     }
     template: {
       containers: [
         {
-          name: 'rust-api'
-          image: containerImage
+          image: '${acrUri}/${app.appName}:${app.imageTag}'
+          name: app.appName
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            cpu: app.containerAppCPU
+            memory: app.containerAppMemory
           }
-          env: [
-            {
-              name: 'APP_ENV'
-              value: environmentName
-            }
-            {
-              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-              value: appInsightsConnectionString
-            }
-            {
-              name: 'DATABASE_HOST'
-              value: databaseHost
-            }
-            {
-              name: 'DATABASE_PORT'
-              value: '5432'
-            }
-            {
-              name: 'DATABASE_NAME'
-              value: databaseName
-            }
-            {
-              name: 'DATABASE_USER'
-              value: databaseUser
-            }
-            {
-              name: 'DATABASE_PASSWORD'
-              secretRef: 'postgres-password'
-            }
-          ]
+          env: resolvedEnv
+          probes: app.enableProbes ? probeConfig : null
+          volumeMounts: !empty(volumeMounts) ? volumeMounts : null
         }
       ]
+      volumes: !empty(volumes) ? volumes : null
       scale: {
-        minReplicas: 1
-        maxReplicas: 3
+        maxReplicas: app.maxReplicas
+        minReplicas: app.minReplicas
       }
     }
   }
 }
-
-output containerAppFqdn string = rustApiContainerApp.properties.configuration.ingress.fqdn

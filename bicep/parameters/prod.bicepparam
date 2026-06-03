@@ -9,6 +9,7 @@ param rustApiContainerImage = 'mcr.microsoft.com/azuredocs/containerapps-hellowo
 param postgresAdminLogin = 'egwadmin'
 param postgresAdminPassword = '' // Overridden at deploy time via workflow secret
 param deployFrontDoor = false // Set to true when enabling global edge caching and WAF
+param containerApp = []
 param commonTags = {
   workload: 'egw'
   environment: 'prod'
