@@ -14,8 +14,8 @@ on:
         description: Deployment scope
         required: true
         type: choice
+        default: subscription
         options:
-          - resourceGroup
           - subscription
       resourceGroup:
         description: Target resource group (for resourceGroup scope)
