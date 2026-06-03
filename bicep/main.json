@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.40.2.10011",
-      "templateHash": "17241851626615510271"
+      "templateHash": "5705939047982231721"
     }
   },
   "parameters": {
@@ -1911,7 +1911,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.40.2.10011",
-              "templateHash": "18241983248255865035"
+              "templateHash": "829028296659362772"
             }
           },
           "parameters": {
@@ -1930,23 +1930,13 @@
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
-                "logs": [
-                  {
-                    "category": "StorageRead",
-                    "enabled": true
-                  },
-                  {
-                    "category": "StorageWrite",
-                    "enabled": true
-                  },
-                  {
-                    "category": "StorageDelete",
-                    "enabled": true
-                  }
-                ],
                 "metrics": [
                   {
-                    "category": "AllMetrics",
+                    "category": "Transaction",
+                    "enabled": true
+                  },
+                  {
+                    "category": "Capacity",
                     "enabled": true
                   }
                 ]

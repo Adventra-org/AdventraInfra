@@ -10,23 +10,13 @@ resource storageDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-pr
   scope: storageAccount
   properties: {
     workspaceId: logAnalyticsWorkspaceId
-    logs: [
-      {
-        category: 'StorageRead'
-        enabled: true
-      }
-      {
-        category: 'StorageWrite'
-        enabled: true
-      }
-      {
-        category: 'StorageDelete'
-        enabled: true
-      }
-    ]
     metrics: [
       {
-        category: 'AllMetrics'
+        category: 'Transaction'
+        enabled: true
+      }
+      {
+        category: 'Capacity'
         enabled: true
       }
     ]
