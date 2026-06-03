@@ -37,7 +37,7 @@ jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment == 'dev' && 'deveopment' || 'production' }}
+    environment: ${{ github.event.inputs.environment == 'dev' && 'development' || 'production' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -81,7 +81,7 @@ jobs:
     if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
     needs: deploy-subscription-scope
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment == 'dev' && 'deveopment' || 'production' }}
+    environment: ${{ github.event.inputs.environment == 'dev' && 'development' || 'production' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
