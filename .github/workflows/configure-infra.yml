@@ -9,6 +9,12 @@ on:
       - 'keycloak/**'
       - '.github/workflows/configure-infra.yml'
   workflow_dispatch:
+    inputs:
+      lockdownPostgres:
+        description: Lock down PostgreSQL after configuration (disable password auth)
+        required: false
+        type: boolean
+        default: false
 
 env:
   subscriptionId: '9ab32d5c-5f7a-413a-b251-8598b4546692'
@@ -422,9 +428,90 @@ jobs:
 
           echo "✅ Keycloak DB config stored in Key Vault"
 
+  lockdown-postgresql:
+    name: Lockdown PostgreSQL (Entra ID Only)
+    needs: configure-pgsql
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Secure PostgreSQL - Disable Password Auth, Keep Public Access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.lockdownPostgres || 'false' }}" != "true" ]; then
+            echo "Skipping PostgreSQL lockdown for this run"
+            exit 0
+          fi
+
+          RESOURCE_GROUP="${{ env.resourceGroupName }}"
+          POSTGRES_SERVER="${{ needs.configure-pgsql.outputs.postgresServerName }}"
+
+          echo "Locking down PostgreSQL server: $POSTGRES_SERVER"
+
+          CURRENT_CONFIG=$(az postgres flexible-server show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
+            -o json)
+
+          echo "Current configuration:"
+          echo "$CURRENT_CONFIG" | jq '.'
+
+          az postgres flexible-server update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --public-access Enabled
+
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --rule-name "AllowAll_all_ips" \
+            --start-ip-address "0.0.0.0" \
+            --end-ip-address "255.255.255.255" \
+            || true
+
+          az postgres flexible-server update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --password-auth Disabled
+
+          FINAL_CONFIG=$(az postgres flexible-server show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
+            -o json)
+
+          echo "Final configuration:"
+          echo "$FINAL_CONFIG" | jq '.'
+
+          FINAL_PASSWORD_AUTH=$(echo "$FINAL_CONFIG" | jq -r '.passwordAuth')
+          FINAL_PUBLIC_ACCESS=$(echo "$FINAL_CONFIG" | jq -r '.publicAccess')
+
+          if [ "$FINAL_PASSWORD_AUTH" != "Disabled" ]; then
+            echo "ERROR: Password authentication is still enabled"
+            exit 1
+          fi
+
+          if [ "$FINAL_PUBLIC_ACCESS" != "Enabled" ]; then
+            echo "ERROR: Public access is not enabled"
+            exit 1
+          fi
+
+          echo "Lockdown complete: Entra ID only with public connectivity enabled"
+
   build-and-push-keycloak:
     name: Build and Push Keycloak Image
-    needs: configure-pgsql
+    needs:
+      - configure-pgsql
+      - lockdown-postgresql
     runs-on: ubuntu-latest
     environment: development
     steps:

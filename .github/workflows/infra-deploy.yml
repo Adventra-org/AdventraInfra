@@ -10,26 +10,13 @@ on:
         options:
           - dev
           - prod
-      resourceGroup:
-        description: PostgreSQL resource group (used only when lockdownPostgres is true)
-        required: false
       location:
         description: Azure region
         required: false
         default: eastus2
-      lockdownPostgres:
-        description: Lockdown PostgreSQL after deployment (Entra ID only)
-        required: false
-        type: boolean
-        default: false
-      postgresServerName:
-        description: PostgreSQL server name (required if lockdownPostgres is true)
-        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  postgresServerName: 'ar-dev-pg-qlon27cr5h6tu'
-  keycloakManagedIdentityName: 'ar-dev-uami'
 
 permissions:
   id-token: write
@@ -107,81 +94,4 @@ jobs:
             --parameters keyVaultNameSalt="$KEYVAULT_NAME_SALT" \
             --only-show-errors
 
-  lockdown-postgresql:
-    name: Lockdown PostgreSQL (Entra ID Only)
-    if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
-    needs: deploy-subscription-scope
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment == 'dev' && 'development' || 'production' }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Secure PostgreSQL - Disable Password Auth, Keep Public Access
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          RESOURCE_GROUP="${{ github.event.inputs.resourceGroup || 'adventra-dev' }}"
-          POSTGRES_SERVER="${{ github.event.inputs.postgresServerName }}"
-
-          echo "Locking down PostgreSQL server: $POSTGRES_SERVER"
-
-          CURRENT_CONFIG=$(az postgres flexible-server show \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
-            -o json)
-
-          echo "Current configuration:"
-          echo "$CURRENT_CONFIG" | jq '.'
-
-          az postgres flexible-server update \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --public-access Enabled
-
-          az postgres flexible-server firewall-rule create \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --rule-name "AllowAll_all_ips" \
-            --start-ip-address "0.0.0.0" \
-            --end-ip-address "255.255.255.255" \
-            || true
-
-          az postgres flexible-server update \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --password-auth Disabled
-
-          FINAL_CONFIG=$(az postgres flexible-server show \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
-            -o json)
-
-          echo "Final configuration:"
-          echo "$FINAL_CONFIG" | jq '.'
-
-          FINAL_PASSWORD_AUTH=$(echo "$FINAL_CONFIG" | jq -r '.passwordAuth')
-          FINAL_PUBLIC_ACCESS=$(echo "$FINAL_CONFIG" | jq -r '.publicAccess')
-
-          if [ "$FINAL_PASSWORD_AUTH" != "Disabled" ]; then
-            echo "ERROR: Password authentication is still enabled"
-            exit 1
-          fi
-
-          if [ "$FINAL_PUBLIC_ACCESS" != "Enabled" ]; then
-            echo "ERROR: Public access is not enabled"
-            exit 1
-          fi
-
-          echo "Lockdown complete: Entra ID only with public connectivity enabled"
 
