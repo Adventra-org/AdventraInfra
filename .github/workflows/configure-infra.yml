@@ -316,23 +316,57 @@ jobs:
           PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
           KV_NAME="${{ steps.discover-resources.outputs.keyVaultName }}"
 
-          SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
+          CALLER_ASSIGNEE=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
           KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
+
+          RBAC_MATCH_COUNT=$(az role assignment list \
+            --assignee "$CALLER_ASSIGNEE" \
+            --scope "$KV_ID" \
+            --include-inherited \
+            --query "[?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'].length(@)" \
+            -o tsv 2>/dev/null || echo "0")
+
+          if [ "$RBAC_MATCH_COUNT" = "0" ]; then
+            echo "❌ Caller does not appear to have Key Vault write permissions at or above vault scope"
+            echo "Caller assignee: $CALLER_ASSIGNEE"
+            echo "Key Vault scope: $KV_ID"
+            echo "Required RBAC (one of): Key Vault Secrets Officer, Key Vault Administrator, Owner"
+            echo ""
+            echo "Visible role assignments for caller at vault scope (including inherited):"
+            az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+            exit 1
+          fi
 
           set_secret_with_retry() {
             local secret_name="$1"
             local secret_value="$2"
             local attempt=1
-            local max_attempts=20
-            local delay_seconds=30
+            local max_attempts=6
+            local delay_seconds=10
+            local err_file=""
 
             while [ "$attempt" -le "$max_attempts" ]; do
-              if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" >/dev/null 2>&1; then
+              err_file=$(mktemp)
+              if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" --only-show-errors >/dev/null 2>"$err_file"; then
+                rm -f "$err_file"
                 echo "✅ Secret set: $secret_name"
                 return 0
               fi
 
+              error_text=$(cat "$err_file" || true)
+              rm -f "$err_file"
               echo "⚠️ Failed to set '$secret_name' (attempt $attempt/$max_attempts)."
+
+              if echo "$error_text" | grep -qiE "forbidden|does not have secrets set permission|authorizationfailed|access denied|insufficient privileges"; then
+                echo "❌ Authorization failure while writing secret '$secret_name'"
+                echo "$error_text"
+                return 1
+              fi
+
+              if [ -n "$error_text" ]; then
+                echo "$error_text"
+              fi
+
               if [ "$attempt" -lt "$max_attempts" ]; then
                 echo "Waiting ${delay_seconds}s for RBAC propagation..."
                 sleep "$delay_seconds"
@@ -344,20 +378,20 @@ jobs:
             return 1
           }
 
-          set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME" || true
-          set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com" || true
-          set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME" || true
-          set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME" || true
+          set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME"
+          set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com"
+          set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME"
+          set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME"
 
           for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
             if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "❌ Secret missing after retries: $s"
-              echo "Caller object ID (from current az context): $SP_OBJECT_ID"
+              echo "Caller assignee (from current az context): $CALLER_ASSIGNEE"
               echo "Key Vault scope: $KV_ID"
               echo "Expected RBAC role: Key Vault Secrets Officer (b86a8fe4-44ce-4948-aee5-eccb2c155cd7)"
               echo ""
               echo "Role assignments currently visible for caller at vault scope:"
-              az role assignment list --assignee "$SP_OBJECT_ID" --scope "$KV_ID" --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+              az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
               exit 1
             fi
           done
