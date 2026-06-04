@@ -30,7 +30,7 @@ RUN chown -R 1000:1000 /opt/keycloak/providers
 
 USER 1000
 
-COPY keycloak/cpln-realm.json /opt/keycloak/data/import/adventra-realm.json
+COPY keycloak/adventra-realm.json /opt/keycloak/data/import/adventra-realm.json
 RUN /opt/keycloak/bin/kc.sh build \
     --db=postgres \
     --health-enabled=true \

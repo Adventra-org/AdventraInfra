@@ -460,7 +460,7 @@ jobs:
 
           KV_NAME='${{ needs.configure-pgsql.outputs.keyVaultName }}'
           SECRET_NAME='${{ env.keycloakRealmPasswordSecretName }}'
-          REALM_FILE='keycloak/cpln-realm.json'
+          REALM_FILE='keycloak/adventra-realm.json'
 
           if [ ! -f "$REALM_FILE" ]; then
             echo "❌ Realm file not found: $REALM_FILE"
