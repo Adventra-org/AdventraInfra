@@ -151,9 +151,7 @@ jobs:
           PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           KC_DB_NAME="keycloak"
-          HERMES_DB_NAME="hermes"
-          PLANA_DB_NAME="plana"
-          UZERCHE_DB_NAME="uzerche"
+          ADVENTRA_DB_NAME="adventra"
           IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
           IDENTITY_RG="${{ env.keycloakManagedIdentityResourceGroup }}"
 
@@ -215,7 +213,7 @@ jobs:
             PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
           done
 
-          for DB_NAME in "$KC_DB_NAME" "$HERMES_DB_NAME" "$PLANA_DB_NAME" "$UZERCHE_DB_NAME"; do
+          for DB_NAME in "$KC_DB_NAME" "$ADVENTRA_DB_NAME"; do
             psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
               "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || \
             psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
@@ -232,7 +230,7 @@ jobs:
 
           ROLE_NAME="$IDENTITY_NAME"
 
-          for DB_NAME in "$KC_DB_NAME" "$HERMES_DB_NAME" "$PLANA_DB_NAME" "$UZERCHE_DB_NAME"; do
+          for DB_NAME in "$KC_DB_NAME" "$ADVENTRA_DB_NAME"; do
             psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
               "GRANT CONNECT ON DATABASE $DB_NAME TO \"$ROLE_NAME\";"
 
@@ -256,14 +254,14 @@ jobs:
 
           echo "✅ PostgreSQL configured for Entra ID managed identity auth"
 
-      - name: Create PostGIS Extension in Plana DB
+      - name: Create PostGIS Extension in Adventra DB
         shell: bash
         run: |
           set -euxo pipefail
 
           PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
-          PLANA_DB_NAME="plana"
+          ADVENTRA_DB_NAME="adventra"
 
           OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
           if [ -n "$OVERRIDE_NAME" ]; then
@@ -278,11 +276,11 @@ jobs:
 
           IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
 
-          psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
+          psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$ADVENTRA_DB_NAME sslmode=require" -c \
             "CREATE EXTENSION IF NOT EXISTS postgis; \
              GRANT azure_pg_admin TO \"$IDENTITY_NAME\";"
 
-          echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in plana database"
+          echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in adventra database"
 
       - name: Store Keycloak DB Config in Key Vault
         shell: bash
