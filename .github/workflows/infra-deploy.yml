@@ -28,6 +28,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  postgresServerName: 'ar-dev-pg-qlon27cr5h6tu'
+  keycloakManagedIdentityName: 'ar-dev-uami'
 
 permissions:
   id-token: write

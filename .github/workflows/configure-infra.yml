@@ -13,9 +13,9 @@ on:
 env:
   subscriptionId: '9ab32d5c-5f7a-413a-b251-8598b4546692'
   resourceGroupName: 'adventra-dev'
-  keyVaultName: 'cpkvdev'
-  postgresServerName: 'cppgsrvdev'
-  keycloakManagedIdentityName: 'cpdpuamidev'
+  keyVaultName: ''
+  postgresServerName: ''
+  keycloakManagedIdentityName: ''
   keycloakManagedIdentityResourceGroup: 'adventra-dev'
   servicePrincipalDisplayNameOverride: ''
   keycloakImageName: 'keycloak'
@@ -31,6 +31,10 @@ jobs:
     name: Configure PostgreSQL with Managed Identity
     runs-on: ubuntu-latest
     environment: development
+    outputs:
+      postgresServerName: ${{ steps.discover-resources.outputs.postgresServerName }}
+      keyVaultName: ${{ steps.discover-resources.outputs.keyVaultName }}
+      keycloakManagedIdentityName: ${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,15 +46,65 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Discover Resource Names
+        id: discover-resources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RG="${{ env.resourceGroupName }}"
+          PG_SERVER_NAME="${{ env.postgresServerName }}"
+          KV_NAME="${{ env.keyVaultName }}"
+          UAMI_NAME="${{ env.keycloakManagedIdentityName }}"
+
+          if [ -z "$PG_SERVER_NAME" ]; then
+            PG_SERVER_NAME=$(az postgres flexible-server list --resource-group "$RG" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$PG_SERVER_NAME" ]; then
+            PG_SERVER_NAME=$(az postgres flexible-server list --resource-group "$RG" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME=$(az keyvault list --resource-group "$RG" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME=$(az keyvault list --resource-group "$RG" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$UAMI_NAME" ]; then
+            UAMI_NAME=$(az identity list --resource-group "${{ env.keycloakManagedIdentityResourceGroup }}" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$UAMI_NAME" ]; then
+            UAMI_NAME=$(az identity list --resource-group "${{ env.keycloakManagedIdentityResourceGroup }}" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$PG_SERVER_NAME" ] || [ -z "$KV_NAME" ] || [ -z "$UAMI_NAME" ]; then
+            echo "ERROR: Failed to resolve one or more required resources in resource group '$RG'"
+            echo "Resolved postgres: '$PG_SERVER_NAME'"
+            echo "Resolved key vault: '$KV_NAME'"
+            echo "Resolved identity: '$UAMI_NAME'"
+            exit 1
+          fi
+
+          echo "postgresServerName=$PG_SERVER_NAME" >> "$GITHUB_OUTPUT"
+          echo "keyVaultName=$KV_NAME" >> "$GITHUB_OUTPUT"
+          echo "keycloakManagedIdentityName=$UAMI_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Discovered PostgreSQL server: $PG_SERVER_NAME"
+          echo "Discovered Key Vault: $KV_NAME"
+          echo "Discovered UAMI: $UAMI_NAME"
+
       - name: Enable Entra ID Authentication
         shell: bash
         run: |
           set -euxo pipefail
 
+          POSTGRES_SERVER_NAME="${{ steps.discover-resources.outputs.postgresServerName }}"
+
           az postgres flexible-server update \
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
             --resource-group "${{ env.resourceGroupName }}" \
-            --name "${{ env.postgresServerName }}" \
+            --name "$POSTGRES_SERVER_NAME" \
             --password-auth Enabled \
             --microsoft-entra-auth Enabled \
             || echo "⚠️ Entra auth may already be enabled"
@@ -62,13 +116,15 @@ jobs:
         run: |
           set -euxo pipefail
 
+          POSTGRES_SERVER_NAME="${{ steps.discover-resources.outputs.postgresServerName }}"
+
           SP_APP_ID=$(az account show --query user.name -o tsv)
           SP_OBJECT_ID=$(az ad sp show --id "$SP_APP_ID" --query id -o tsv)
           SP_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
 
           CURRENT_ADMINS=$(az postgres flexible-server microsoft-entra-admin list \
             --resource-group "${{ env.resourceGroupName }}" \
-            --server-name "${{ env.postgresServerName }}" \
+            --server-name "$POSTGRES_SERVER_NAME" \
             --query "[].{objectId:objectId, name:principalName}" -o json 2>/dev/null || echo "[]")
 
           ADMIN_EXISTS=$(echo "$CURRENT_ADMINS" | jq -r --arg oid "$SP_OBJECT_ID" '.[] | select(.objectId==$oid) | .objectId' || echo "")
@@ -76,7 +132,7 @@ jobs:
           if [ -z "$ADMIN_EXISTS" ]; then
             az postgres flexible-server microsoft-entra-admin create \
               --resource-group "${{ env.resourceGroupName }}" \
-              --server-name "${{ env.postgresServerName }}" \
+              --server-name "$POSTGRES_SERVER_NAME" \
               --object-id "$SP_OBJECT_ID" \
               --display-name "$SP_NAME" \
               --type ServicePrincipal
@@ -92,13 +148,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          PG_SERVER="${{ env.postgresServerName }}"
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           KC_DB_NAME="keycloak"
           HERMES_DB_NAME="hermes"
           PLANA_DB_NAME="plana"
           UZERCHE_DB_NAME="uzerche"
-          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
           IDENTITY_RG="${{ env.keycloakManagedIdentityResourceGroup }}"
 
           sudo apt-get update -y
@@ -106,13 +162,13 @@ jobs:
 
           az postgres flexible-server update \
             --resource-group "${{ env.resourceGroupName }}" \
-            --name "${{ env.postgresServerName }}" \
+            --name "$PG_SERVER" \
             --public-access Enabled \
             || true
 
           az postgres flexible-server firewall-rule create \
             --resource-group "${{ env.resourceGroupName }}" \
-            --server-name "${{ env.postgresServerName }}" \
+            --server-name "$PG_SERVER" \
             --name "AllowAll_all_ips" \
             --start-ip-address "0.0.0.0" \
             --end-ip-address "255.255.255.255" \
@@ -205,7 +261,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          PG_SERVER="${{ env.postgresServerName }}"
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           PLANA_DB_NAME="plana"
 
@@ -220,7 +276,7 @@ jobs:
           export PGPASSWORD
           PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
 
-          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
 
           psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$PLANA_DB_NAME sslmode=require" -c \
             "CREATE EXTENSION IF NOT EXISTS postgis; \
@@ -234,9 +290,9 @@ jobs:
           set -euxo pipefail
 
           KC_DB_NAME="keycloak"
-          IDENTITY_NAME="${{ env.keycloakManagedIdentityName }}"
-          PG_SERVER="${{ env.postgresServerName }}"
-          KV_NAME="${{ env.keyVaultName }}"
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
+          KV_NAME="${{ steps.discover-resources.outputs.keyVaultName }}"
 
           SP_OBJECT_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
           KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
@@ -322,7 +378,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          KV_NAME='${{ env.keyVaultName }}'
+          KV_NAME='${{ needs.configure-pgsql.outputs.keyVaultName }}'
           SECRET_NAME='${{ env.keycloakRealmPasswordSecretName }}'
           REALM_FILE='keycloak/cpln-realm.json'
 
