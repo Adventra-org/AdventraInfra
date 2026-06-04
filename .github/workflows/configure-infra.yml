@@ -317,24 +317,48 @@ jobs:
           KV_NAME="${{ steps.discover-resources.outputs.keyVaultName }}"
 
           CALLER_ASSIGNEE=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
+          SP_OBJECT_ID=$(az ad sp show --id "$CALLER_ASSIGNEE" --query id -o tsv 2>/dev/null || echo "")
           KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
 
           RBAC_MATCH_COUNT=$(az role assignment list \
             --assignee "$CALLER_ASSIGNEE" \
             --scope "$KV_ID" \
             --include-inherited \
-            --query "[?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'].length(@)" \
+            --query "length([?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'])" \
             -o tsv 2>/dev/null || echo "0")
 
           if [ "$RBAC_MATCH_COUNT" = "0" ]; then
-            echo "❌ Caller does not appear to have Key Vault write permissions at or above vault scope"
-            echo "Caller assignee: $CALLER_ASSIGNEE"
-            echo "Key Vault scope: $KV_ID"
-            echo "Required RBAC (one of): Key Vault Secrets Officer, Key Vault Administrator, Owner"
-            echo ""
-            echo "Visible role assignments for caller at vault scope (including inherited):"
-            az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
-            exit 1
+            echo "No current Key Vault write role detected for caller. Attempting to assign 'Key Vault Secrets Officer' on vault scope..."
+
+            if [ -n "$SP_OBJECT_ID" ]; then
+              az role assignment create \
+                --assignee-object-id "$SP_OBJECT_ID" \
+                --assignee-principal-type ServicePrincipal \
+                --role "Key Vault Secrets Officer" \
+                --scope "$KV_ID" \
+                --only-show-errors || true
+            fi
+
+            sleep 15
+
+            RBAC_MATCH_COUNT=$(az role assignment list \
+              --assignee "$CALLER_ASSIGNEE" \
+              --scope "$KV_ID" \
+              --include-inherited \
+              --query "length([?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'])" \
+              -o tsv 2>/dev/null || echo "0")
+
+            if [ "$RBAC_MATCH_COUNT" = "0" ]; then
+              echo "❌ Caller still does not have Key Vault write permissions at or above vault scope"
+              echo "Caller assignee: $CALLER_ASSIGNEE"
+              echo "Caller object ID: ${SP_OBJECT_ID:-unknown}"
+              echo "Key Vault scope: $KV_ID"
+              echo "Required RBAC (one of): Key Vault Secrets Officer, Key Vault Administrator, Owner"
+              echo ""
+              echo "Visible role assignments for caller at vault scope (including inherited):"
+              az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+              exit 1
+            fi
           fi
 
           set_secret_with_retry() {
