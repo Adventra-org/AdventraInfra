@@ -1,0 +1,614 @@
+name: Configure Infra
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+    paths:
+      - 'keycloak/**'
+      - '.github/workflows/configure-infra.yml'
+  workflow_dispatch:
+    inputs:
+      lockdownPostgres:
+        description: Lock down PostgreSQL after configuration (disable password auth)
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  subscriptionId: '9ab32d5c-5f7a-413a-b251-8598b4546692'
+  resourceGroupName: 'adventra-dev'
+  keyVaultName: ''
+  postgresServerName: ''
+  keycloakManagedIdentityName: ''
+  keycloakManagedIdentityResourceGroup: 'adventra-dev'
+  servicePrincipalDisplayNameOverride: ''
+  keycloakImageName: 'keycloak'
+  keycloakRealmPasswordSecretName: 'keycloak-client-secret'
+  athensAdminClientSecretName: 'athens-keycloak-admin-client-secret'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  configure-pgsql:
+    name: Configure PostgreSQL with Managed Identity
+    runs-on: ubuntu-latest
+    environment: development
+    outputs:
+      postgresServerName: ${{ steps.discover-resources.outputs.postgresServerName }}
+      keyVaultName: ${{ steps.discover-resources.outputs.keyVaultName }}
+      keycloakManagedIdentityName: ${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Discover Resource Names
+        id: discover-resources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RG="${{ env.resourceGroupName }}"
+          PG_SERVER_NAME="${{ env.postgresServerName }}"
+          KV_NAME="${{ env.keyVaultName }}"
+          UAMI_NAME="${{ env.keycloakManagedIdentityName }}"
+
+          if [ -z "$PG_SERVER_NAME" ]; then
+            PG_SERVER_NAME=$(az postgres flexible-server list --resource-group "$RG" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$PG_SERVER_NAME" ]; then
+            PG_SERVER_NAME=$(az postgres flexible-server list --resource-group "$RG" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME=$(az keyvault list --resource-group "$RG" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$KV_NAME" ]; then
+            KV_NAME=$(az keyvault list --resource-group "$RG" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$UAMI_NAME" ]; then
+            UAMI_NAME=$(az identity list --resource-group "${{ env.keycloakManagedIdentityResourceGroup }}" --query "[?tags.environment=='dev' && tags.workload=='ar'].name | [0]" -o tsv)
+          fi
+          if [ -z "$UAMI_NAME" ]; then
+            UAMI_NAME=$(az identity list --resource-group "${{ env.keycloakManagedIdentityResourceGroup }}" --query "[0].name" -o tsv)
+          fi
+
+          if [ -z "$PG_SERVER_NAME" ] || [ -z "$KV_NAME" ] || [ -z "$UAMI_NAME" ]; then
+            echo "ERROR: Failed to resolve one or more required resources in resource group '$RG'"
+            echo "Resolved postgres: '$PG_SERVER_NAME'"
+            echo "Resolved key vault: '$KV_NAME'"
+            echo "Resolved identity: '$UAMI_NAME'"
+            exit 1
+          fi
+
+          echo "postgresServerName=$PG_SERVER_NAME" >> "$GITHUB_OUTPUT"
+          echo "keyVaultName=$KV_NAME" >> "$GITHUB_OUTPUT"
+          echo "keycloakManagedIdentityName=$UAMI_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Discovered PostgreSQL server: $PG_SERVER_NAME"
+          echo "Discovered Key Vault: $KV_NAME"
+          echo "Discovered UAMI: $UAMI_NAME"
+
+      - name: Enable Entra ID Authentication
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          POSTGRES_SERVER_NAME="${{ steps.discover-resources.outputs.postgresServerName }}"
+
+          az postgres flexible-server update \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name "$POSTGRES_SERVER_NAME" \
+            --password-auth Enabled \
+            --microsoft-entra-auth Enabled \
+            || echo "⚠️ Entra auth may already be enabled"
+
+          echo "✅ Entra ID and password authentication enabled (dual-auth mode)"
+
+      - name: Add Pipeline Service Principal as Entra Admin
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          POSTGRES_SERVER_NAME="${{ steps.discover-resources.outputs.postgresServerName }}"
+
+          SP_APP_ID=$(az account show --query user.name -o tsv)
+          SP_OBJECT_ID=$(az ad sp show --id "$SP_APP_ID" --query id -o tsv)
+          SP_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+
+          CURRENT_ADMINS=$(az postgres flexible-server microsoft-entra-admin list \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --server-name "$POSTGRES_SERVER_NAME" \
+            --query "[].{objectId:objectId, name:principalName}" -o json 2>/dev/null || echo "[]")
+
+          ADMIN_EXISTS=$(echo "$CURRENT_ADMINS" | jq -r --arg oid "$SP_OBJECT_ID" '.[] | select(.objectId==$oid) | .objectId' || echo "")
+
+          if [ -z "$ADMIN_EXISTS" ]; then
+            az postgres flexible-server microsoft-entra-admin create \
+              --resource-group "${{ env.resourceGroupName }}" \
+              --server-name "$POSTGRES_SERVER_NAME" \
+              --object-id "$SP_OBJECT_ID" \
+              --display-name "$SP_NAME" \
+              --type ServicePrincipal
+
+            echo "⏳ Waiting 60 seconds for admin role to propagate..."
+            sleep 60
+          fi
+
+          echo "✅ Service principal is Entra admin"
+
+      - name: Setup PostgreSQL Database with Managed Identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
+          PG_HOST="$PG_SERVER.postgres.database.azure.com"
+          KC_DB_NAME="keycloak"
+          ADVENTRA_DB_NAME="adventra"
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
+          IDENTITY_RG="${{ env.keycloakManagedIdentityResourceGroup }}"
+
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client jq || true
+
+          az postgres flexible-server update \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name "$PG_SERVER" \
+            --public-access Enabled \
+            || true
+
+          az postgres flexible-server firewall-rule create \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name "$PG_SERVER" \
+            --rule-name "AllowAll_all_ips" \
+            --start-ip-address "0.0.0.0" \
+            --end-ip-address "255.255.255.255" \
+            || true
+
+          IDENTITY_INFO=$(az identity show \
+            --name "$IDENTITY_NAME" \
+            --resource-group "$IDENTITY_RG" \
+            --query "{principalId:principalId, clientId:clientId}" -o json)
+
+          PRINCIPAL_ID=$(echo "$IDENTITY_INFO" | jq -r '.principalId')
+
+          SP_APP_ID=$(az account show --query user.name -o tsv 2>/dev/null || echo "")
+          if [ -z "$SP_APP_ID" ]; then
+            echo "❌ ERROR: Could not determine service principal app ID"
+            exit 1
+          fi
+
+          OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
+          if [ -n "$OVERRIDE_NAME" ]; then
+            SP_DISPLAY_NAME="$OVERRIDE_NAME"
+          else
+            SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+          fi
+
+          CURRENT_USER="$SP_DISPLAY_NAME"
+
+          export PGPASSWORD
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c "SELECT version();" >/dev/null 2>&1; then
+              echo "✅ Connection successful"
+              break
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+              echo "❌ ERROR: Connection failed after retries"
+              exit 1
+            fi
+            sleep 30
+            PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+          done
+
+          for DB_NAME in "$KC_DB_NAME" "$ADVENTRA_DB_NAME"; do
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || \
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "CREATE DATABASE $DB_NAME;"
+          done
+
+          ROLE_EXISTS=$(psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -t -c \
+            "SELECT 1 FROM pgaadauth_list_principals(false) WHERE objectid = '$PRINCIPAL_ID';" 2>/dev/null | tr -d ' ' || echo "0")
+
+          if [ "$ROLE_EXISTS" != "1" ]; then
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "SELECT * FROM pgaadauth_create_principal_with_oid('$IDENTITY_NAME', '$PRINCIPAL_ID', 'service', false, false);"
+          fi
+
+          ROLE_NAME="$IDENTITY_NAME"
+
+          for DB_NAME in "$KC_DB_NAME" "$ADVENTRA_DB_NAME"; do
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=postgres sslmode=require" -c \
+              "GRANT CONNECT ON DATABASE $DB_NAME TO \"$ROLE_NAME\";"
+
+            psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -c \
+              "GRANT USAGE, CREATE ON SCHEMA public TO \"$ROLE_NAME\"; \
+              GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"$ROLE_NAME\"; \
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"$ROLE_NAME\"; \
+              GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"$ROLE_NAME\"; \
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \"$ROLE_NAME\";"
+
+            PRIV_CHECK=$(psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -t -A -c \
+              "SELECT has_schema_privilege('$ROLE_NAME', 'public', 'USAGE') AND has_schema_privilege('$ROLE_NAME', 'public', 'CREATE');")
+
+            if [ "$PRIV_CHECK" != "t" ]; then
+              echo "❌ ERROR: Role '$ROLE_NAME' is missing required schema permissions on public in database '$DB_NAME'"
+              psql "host=$PG_HOST user='$CURRENT_USER' dbname=$DB_NAME sslmode=require" -c \
+                "SELECT '$ROLE_NAME' AS role_name, '$DB_NAME' AS database_name, has_schema_privilege('$ROLE_NAME', 'public', 'USAGE') AS has_usage, has_schema_privilege('$ROLE_NAME', 'public', 'CREATE') AS has_create;"
+              exit 1
+            fi
+          done
+
+          echo "✅ PostgreSQL configured for Entra ID managed identity auth"
+
+      - name: Create PostGIS Extension in Adventra DB
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
+          PG_HOST="$PG_SERVER.postgres.database.azure.com"
+          ADVENTRA_DB_NAME="adventra"
+
+          # PostGIS must be allow-listed on the server before CREATE EXTENSION will work in Azure.
+          # Read the current allow-list and append postgis if not already present.
+          CURRENT_EXTENSIONS=$(az postgres flexible-server parameter show \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --server-name "$PG_SERVER" \
+            --name azure.extensions \
+            --query value -o tsv 2>/dev/null || echo "")
+
+          if echo "$CURRENT_EXTENSIONS" | grep -qi "postgis"; then
+            echo "postgis already allow-listed: $CURRENT_EXTENSIONS"
+          else
+            if [ -z "$CURRENT_EXTENSIONS" ]; then
+              NEW_EXTENSIONS="POSTGIS"
+            else
+              NEW_EXTENSIONS="${CURRENT_EXTENSIONS},POSTGIS"
+            fi
+            az postgres flexible-server parameter set \
+              --resource-group "${{ env.resourceGroupName }}" \
+              --server-name "$PG_SERVER" \
+              --name azure.extensions \
+              --value "$NEW_EXTENSIONS"
+            echo "✅ PostGIS added to azure.extensions allow-list: $NEW_EXTENSIONS"
+          fi
+
+          OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
+          if [ -n "$OVERRIDE_NAME" ]; then
+            SP_DISPLAY_NAME="$OVERRIDE_NAME"
+          else
+            SP_APP_ID=$(az account show --query user.name -o tsv)
+            SP_DISPLAY_NAME=$(az ad sp show --id "$SP_APP_ID" --query displayName -o tsv)
+          fi
+
+          export PGPASSWORD
+          PGPASSWORD=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
+
+          psql "host=$PG_HOST user='$SP_DISPLAY_NAME' dbname=$ADVENTRA_DB_NAME sslmode=require" -c \
+            "CREATE EXTENSION IF NOT EXISTS postgis; \
+             GRANT azure_pg_admin TO \"$IDENTITY_NAME\";"
+
+          echo "✅ PostGIS extension created and azure_pg_admin granted to $IDENTITY_NAME in adventra database"
+
+      - name: Store Keycloak DB Config in Key Vault
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          KC_DB_NAME="keycloak"
+          IDENTITY_NAME="${{ steps.discover-resources.outputs.keycloakManagedIdentityName }}"
+          PG_SERVER="${{ steps.discover-resources.outputs.postgresServerName }}"
+          KV_NAME="${{ steps.discover-resources.outputs.keyVaultName }}"
+
+          CALLER_ASSIGNEE=$(az account show --query user.name -o tsv 2>/dev/null || echo "unknown")
+          SP_OBJECT_ID=$(az ad sp show --id "$CALLER_ASSIGNEE" --query id -o tsv 2>/dev/null || echo "")
+          KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
+
+          RBAC_MATCH_COUNT=$(az role assignment list \
+            --assignee "$CALLER_ASSIGNEE" \
+            --scope "$KV_ID" \
+            --include-inherited \
+            --query "length([?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'])" \
+            -o tsv 2>/dev/null || echo "0")
+
+          if [ "$RBAC_MATCH_COUNT" = "0" ]; then
+            echo "No current Key Vault write role detected for caller. Attempting to assign 'Key Vault Secrets Officer' on vault scope..."
+
+            if [ -n "$SP_OBJECT_ID" ]; then
+              az role assignment create \
+                --assignee-object-id "$SP_OBJECT_ID" \
+                --assignee-principal-type ServicePrincipal \
+                --role "Key Vault Secrets Officer" \
+                --scope "$KV_ID" \
+                --only-show-errors || true
+            fi
+
+            sleep 15
+
+            RBAC_MATCH_COUNT=$(az role assignment list \
+              --assignee "$CALLER_ASSIGNEE" \
+              --scope "$KV_ID" \
+              --include-inherited \
+              --query "length([?roleDefinitionName=='Key Vault Secrets Officer' || roleDefinitionName=='Key Vault Administrator' || roleDefinitionName=='Owner'])" \
+              -o tsv 2>/dev/null || echo "0")
+
+            if [ "$RBAC_MATCH_COUNT" = "0" ]; then
+              echo "❌ Caller still does not have Key Vault write permissions at or above vault scope"
+              echo "Caller assignee: $CALLER_ASSIGNEE"
+              echo "Caller object ID: ${SP_OBJECT_ID:-unknown}"
+              echo "Key Vault scope: $KV_ID"
+              echo "Required RBAC (one of): Key Vault Secrets Officer, Key Vault Administrator, Owner"
+              echo ""
+              echo "Visible role assignments for caller at vault scope (including inherited):"
+              az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+              exit 1
+            fi
+          fi
+
+          set_secret_with_retry() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local attempt=1
+            local max_attempts=6
+            local delay_seconds=10
+            local err_file=""
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              err_file=$(mktemp)
+              if az keyvault secret set --vault-name "$KV_NAME" --name "$secret_name" --value "$secret_value" --only-show-errors >/dev/null 2>"$err_file"; then
+                rm -f "$err_file"
+                echo "✅ Secret set: $secret_name"
+                return 0
+              fi
+
+              error_text=$(cat "$err_file" || true)
+              rm -f "$err_file"
+              echo "⚠️ Failed to set '$secret_name' (attempt $attempt/$max_attempts)."
+
+              if echo "$error_text" | grep -qiE "forbidden|does not have secrets set permission|authorizationfailed|access denied|insufficient privileges"; then
+                echo "❌ Authorization failure while writing secret '$secret_name'"
+                echo "$error_text"
+                return 1
+              fi
+
+              if [ -n "$error_text" ]; then
+                echo "$error_text"
+              fi
+
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Waiting ${delay_seconds}s for RBAC propagation..."
+                sleep "$delay_seconds"
+              fi
+              attempt=$((attempt + 1))
+            done
+
+            echo "❌ Unable to set secret '$secret_name' after $max_attempts attempts"
+            return 1
+          }
+
+          set_secret_with_retry "keycloak-db-name" "$KC_DB_NAME"
+          set_secret_with_retry "keycloak-db-host" "$PG_SERVER.postgres.database.azure.com"
+          set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME"
+          set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME"
+
+          for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
+            if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
+              echo "❌ Secret missing after retries: $s"
+              echo "Caller assignee (from current az context): $CALLER_ASSIGNEE"
+              echo "Key Vault scope: $KV_ID"
+              echo "Expected RBAC role: Key Vault Secrets Officer (b86a8fe4-44ce-4948-aee5-eccb2c155cd7)"
+              echo ""
+              echo "Role assignments currently visible for caller at vault scope:"
+              az role assignment list --assignee "$CALLER_ASSIGNEE" --scope "$KV_ID" --include-inherited --query "[].{role:roleDefinitionName, scope:scope}" -o table || true
+              exit 1
+            fi
+          done
+
+          echo "✅ Keycloak DB config stored in Key Vault"
+
+  lockdown-postgresql:
+    name: Lockdown PostgreSQL (Entra ID Only)
+    needs: configure-pgsql
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Secure PostgreSQL - Disable Password Auth, Keep Public Access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.lockdownPostgres || 'false' }}" != "true" ]; then
+            echo "Skipping PostgreSQL lockdown for this run"
+            exit 0
+          fi
+
+          RESOURCE_GROUP="${{ env.resourceGroupName }}"
+          POSTGRES_SERVER="${{ needs.configure-pgsql.outputs.postgresServerName }}"
+
+          echo "Locking down PostgreSQL server: $POSTGRES_SERVER"
+
+          CURRENT_CONFIG=$(az postgres flexible-server show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
+            -o json)
+
+          echo "Current configuration:"
+          echo "$CURRENT_CONFIG" | jq '.'
+
+          az postgres flexible-server update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --public-access Enabled
+
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --rule-name "AllowAll_all_ips" \
+            --start-ip-address "0.0.0.0" \
+            --end-ip-address "255.255.255.255" \
+            || true
+
+          az postgres flexible-server update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --password-auth Disabled
+
+          FINAL_CONFIG=$(az postgres flexible-server show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$POSTGRES_SERVER" \
+            --query '{passwordAuth: authConfig.passwordAuth, entraAuth: authConfig.activeDirectoryAuth, publicAccess: network.publicNetworkAccess}' \
+            -o json)
+
+          echo "Final configuration:"
+          echo "$FINAL_CONFIG" | jq '.'
+
+          FINAL_PASSWORD_AUTH=$(echo "$FINAL_CONFIG" | jq -r '.passwordAuth')
+          FINAL_PUBLIC_ACCESS=$(echo "$FINAL_CONFIG" | jq -r '.publicAccess')
+
+          if [ "$FINAL_PASSWORD_AUTH" != "Disabled" ]; then
+            echo "ERROR: Password authentication is still enabled"
+            exit 1
+          fi
+
+          if [ "$FINAL_PUBLIC_ACCESS" != "Enabled" ]; then
+            echo "ERROR: Public access is not enabled"
+            exit 1
+          fi
+
+          echo "Lockdown complete: Entra ID only with public connectivity enabled"
+
+  build-and-push-keycloak:
+    name: Build and Push Keycloak Image
+    needs:
+      - configure-pgsql
+      - lockdown-postgresql
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.subscriptionId }}
+
+      - name: Discover ACR and Login
+        shell: bash
+        run: |
+          ACR_NAME=$(az acr list --resource-group ${{ env.resourceGroupName }} --query "[0].name" -o tsv)
+
+          if [ -z "$ACR_NAME" ]; then
+            echo "❌ Error: No Azure Container Registry found in resource group ${{ env.resourceGroupName }}"
+            exit 1
+          fi
+
+          echo "Found ACR: $ACR_NAME"
+          echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+
+          az acr login --name $ACR_NAME
+
+      - name: Generate password, store in Key Vault, and patch realm JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KV_NAME='${{ needs.configure-pgsql.outputs.keyVaultName }}'
+          SECRET_NAME='${{ env.keycloakRealmPasswordSecretName }}'
+          REALM_FILE='keycloak/adventra-realm.json'
+
+          if [ ! -f "$REALM_FILE" ]; then
+            echo "❌ Realm file not found: $REALM_FILE"
+            exit 1
+          fi
+
+          REALM_PASSWORD=$(openssl rand -hex 24)
+
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name "$SECRET_NAME" \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          az keyvault secret set \
+            --vault-name "$KV_NAME" \
+            --name '${{ env.athensAdminClientSecretName }}' \
+            --value "$REALM_PASSWORD" \
+            --output none
+
+          placeholders_before=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$placeholders_before" = "0" ]; then
+            echo "❌ No '[PASSWORD GOES HERE]' placeholders found in $REALM_FILE"
+            exit 1
+          fi
+
+          sed -i.bak "s/\[PASSWORD GOES HERE\]/${REALM_PASSWORD}/g" "$REALM_FILE"
+          rm -f "${REALM_FILE}.bak"
+
+          remaining=$(grep -cF '[PASSWORD GOES HERE]' "$REALM_FILE" || true)
+          if [ "$remaining" != "0" ]; then
+            echo "❌ Placeholder replacement incomplete in $REALM_FILE"
+            exit 1
+          fi
+
+          echo "✅ Secret rotated in Key Vault and replaced ${placeholders_before} placeholders in realm JSON"
+
+      - name: Build and Push Keycloak Image
+        shell: bash
+        run: |
+          ACR_URI=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
+
+          if [ -z "$ACR_URI" ]; then
+            echo "❌ Error: Failed to get ACR URI for $ACR_NAME"
+            exit 1
+          fi
+
+          echo "Building Keycloak image: ${ACR_URI}/${{ env.keycloakImageName }}:${{ github.run_number }}"
+          echo "Current directory: $(pwd)"
+          ls -la keycloak/ || echo "Cannot list keycloak/"
+
+          az acr build --registry $ACR_NAME \
+            --image "${{ env.keycloakImageName }}:${{ github.run_number }}" \
+            --image "${{ env.keycloakImageName }}:latest" \
+            --file keycloak/Dockerfile \
+            .
+
+          if [ $? -eq 0 ]; then
+            echo "✅ Image pushed successfully to ACR: ${ACR_URI}/${{ env.keycloakImageName }}:latest"
+          else
+            echo "❌ Failed to build and/or push image to ACR"
+            exit 1
+          fi

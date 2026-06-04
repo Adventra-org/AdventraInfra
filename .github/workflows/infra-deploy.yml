@@ -1,4 +1,4 @@
-name: Adventra Infrastructure Deployment
+name: Infra Deploy
 
 on:
   workflow_dispatch:
@@ -10,28 +10,13 @@ on:
         options:
           - dev
           - prod
-      deploymentScope:
-        description: Deployment scope
-        required: true
-        type: choice
-        options:
-          - resourceGroup
-          - subscription
-      resourceGroup:
-        description: Target resource group (for resourceGroup scope)
-        required: false
       location:
         description: Azure region
         required: false
         default: eastus2
-      lockdownPostgres:
-        description: Lockdown PostgreSQL after deployment (Entra ID only)
-        required: false
-        type: boolean
-        default: false
-      postgresServerName:
-        description: PostgreSQL server name (required if lockdownPostgres is true)
-        required: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   id-token: write
@@ -40,71 +25,75 @@ permissions:
 jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
-    if: ${{ github.event.inputs.deploymentScope == 'subscription' }}
-    uses: ./.github/workflows/templates/deploy-bicep.yml
-    with:
-      location: ${{ github.event.inputs.location }}
-      bicepTemplate: 'AdventraInfra/bicep/main.bicep'
-      bicepParamsFile: 'AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam'
-      deploymentName: 'adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}'
-      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-    secrets:
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-  deploy-resource-group-scope:
-    name: Deploy Infrastructure (Resource Group Scope)
-    if: ${{ github.event.inputs.deploymentScope == 'resourceGroup' }}
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    environment: ${{ github.event.inputs.environment == 'dev' && 'development' || 'production' }}
     steps:
-    steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Azure login (OIDC)
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Ensure resource group
+      - name: Verify Service Principal Permissions
+        shell: bash
         run: |
-          az group create \
-            --name "${{ github.event.inputs.resourceGroup }}" \
-            --location "${{ github.event.inputs.location }}"
+          set -euo pipefail
 
-      - name: Validate Bicep
+          echo "Checking service principal permissions..."
+
+          SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+          SP_OBJECT_ID=$(az account show --query user.name -o tsv)
+
+          ROLE_ASSIGNMENTS=$(az role assignment list \
+            --assignee "$SP_OBJECT_ID" \
+            --scope "/subscriptions/$SUBSCRIPTION_ID" \
+            --query "[?roleDefinitionName=='User Access Administrator' || roleDefinitionName=='Owner'].roleDefinitionName" \
+            -o tsv)
+
+          if echo "$ROLE_ASSIGNMENTS" | grep -qE "User Access Administrator|Owner"; then
+            echo "Service principal has required permissions to assign roles"
+          else
+            echo "WARNING: Service principal does not have User Access Administrator or Owner role"
+            echo "Role assignments may fail. Grant one of the roles if deployment errors occur."
+          fi
+
+      - name: Deploy Bicep to Subscription
+        shell: bash
         run: |
-          az deployment group validate \
-            --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file AdventraInfra/bicep/main.bicep \
-            --parameters AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam
+          set -euo pipefail
 
-      - name: Deploy Bicep
-        run: |
-          az deployment group create \
-            --resource-group "${{ github.event.inputs.resourceGroup }}" \
-            --template-file AdventraInfra/bicep/main.bicep \
-            --parameters AdventraInfra/bicep/parameters/${{ github.event.inputs.environment }}.bicepparam \
-            --query "properties.outputs" \
-            --output jsonc
+          if [ -z "${{ secrets.POSTGRES_ADMIN_PASSWORD }}" ]; then
+            echo "ERROR: Missing required secret POSTGRES_ADMIN_PASSWORD"
+            exit 1
+          fi
 
-  lockdown-postgresql:
-    name: Lockdown PostgreSQL (Entra ID Only)
-    if: ${{ github.event.inputs.lockdownPostgres == 'true' }}
-    needs: 
-      - deploy-subscription-scope
-      - deploy-resource-group-scope
-    # Run if either deployment job ran (one will be skipped based on scope)
-    uses: ./.github/workflows/templates/lockdown-pgsql.yml
-    with:
-      subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      resourceGroup: ${{ github.event.inputs.resourceGroup || 'cprgdev' }}
-      postgresServerName: ${{ github.event.inputs.postgresServerName }}
-    secrets:
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          DEPLOYMENT_NAME="adventra-infra-${{ github.event.inputs.environment }}-${{ github.run_number }}"
+          TEMPLATE_FILE="bicep/main.bicep"
+          PARAMS_FILE="bicep/parameters/${{ github.event.inputs.environment }}.bicepparam"
+          KEYVAULT_NAME_SALT=""
+
+          if [ "${{ github.event.inputs.environment }}" = "dev" ]; then
+            KEYVAULT_NAME_SALT="run-${{ github.run_number }}"
+          fi
+
+          echo "Deploying subscription scope Bicep"
+          echo "Deployment name: $DEPLOYMENT_NAME"
+          echo "Template: $TEMPLATE_FILE"
+          echo "Parameters: $PARAMS_FILE"
+
+          az deployment sub create \
+            --name "$DEPLOYMENT_NAME" \
+            --location "${{ github.event.inputs.location }}" \
+            --template-file "$TEMPLATE_FILE" \
+            --parameters "$PARAMS_FILE" \
+            --parameters postgresAdminPassword="${{ secrets.POSTGRES_ADMIN_PASSWORD }}" \
+            --parameters keyVaultNameSalt="$KEYVAULT_NAME_SALT" \
+            --only-show-errors
+
 
