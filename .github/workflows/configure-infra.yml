@@ -168,8 +168,8 @@ jobs:
 
           az postgres flexible-server firewall-rule create \
             --resource-group "${{ env.resourceGroupName }}" \
-            --server-name "$PG_SERVER" \
-            --name "AllowAll_all_ips" \
+            --name "$PG_SERVER" \
+            --rule-name "AllowAll_all_ips" \
             --start-ip-address "0.0.0.0" \
             --end-ip-address "255.255.255.255" \
             || true
