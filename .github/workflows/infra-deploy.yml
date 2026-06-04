@@ -26,6 +26,8 @@ jobs:
   deploy-subscription-scope:
     name: Deploy Infrastructure (Subscription Scope)
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     environment: ${{ github.event.inputs.environment == 'dev' && 'development' || 'production' }}
     steps:
       - name: Checkout repository
