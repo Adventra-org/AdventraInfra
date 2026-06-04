@@ -263,6 +263,30 @@ jobs:
           PG_HOST="$PG_SERVER.postgres.database.azure.com"
           ADVENTRA_DB_NAME="adventra"
 
+          # PostGIS must be allow-listed on the server before CREATE EXTENSION will work in Azure.
+          # Read the current allow-list and append postgis if not already present.
+          CURRENT_EXTENSIONS=$(az postgres flexible-server parameter show \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --server-name "$PG_SERVER" \
+            --name azure.extensions \
+            --query value -o tsv 2>/dev/null || echo "")
+
+          if echo "$CURRENT_EXTENSIONS" | grep -qi "postgis"; then
+            echo "postgis already allow-listed: $CURRENT_EXTENSIONS"
+          else
+            if [ -z "$CURRENT_EXTENSIONS" ]; then
+              NEW_EXTENSIONS="POSTGIS"
+            else
+              NEW_EXTENSIONS="${CURRENT_EXTENSIONS},POSTGIS"
+            fi
+            az postgres flexible-server parameter set \
+              --resource-group "${{ env.resourceGroupName }}" \
+              --server-name "$PG_SERVER" \
+              --name azure.extensions \
+              --value "$NEW_EXTENSIONS"
+            echo "✅ PostGIS added to azure.extensions allow-list: $NEW_EXTENSIONS"
+          fi
+
           OVERRIDE_NAME="${{ env.servicePrincipalDisplayNameOverride }}"
           if [ -n "$OVERRIDE_NAME" ]; then
             SP_DISPLAY_NAME="$OVERRIDE_NAME"
