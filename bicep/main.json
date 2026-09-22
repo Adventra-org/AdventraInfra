@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "2983631925727182559"
+      "templateHash": "15877654972960401307"
     }
   },
   "parameters": {
@@ -160,6 +160,17 @@
       "defaultValue": "1",
       "metadata": {
         "description": "Azure OpenAI embedding model version."
+      }
+    },
+    "embeddingDeploymentSku": {
+      "type": "string",
+      "defaultValue": "GlobalStandard",
+      "allowedValues": [
+        "GlobalStandard",
+        "Standard"
+      ],
+      "metadata": {
+        "description": "Azure OpenAI embedding deployment SKU."
       }
     },
     "embeddingDeploymentCapacity": {
@@ -1372,7 +1383,7 @@
             "value": "[parameters('embeddingModelVersion')]"
           },
           "skuName": {
-            "value": "Standard"
+            "value": "[parameters('embeddingDeploymentSku')]"
           },
           "capacity": {
             "value": "[parameters('embeddingDeploymentCapacity')]"
