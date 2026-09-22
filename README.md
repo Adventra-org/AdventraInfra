@@ -8,8 +8,8 @@ Infrastructure as Code and deployment automation for Adventra Azure resources.
 - Environment parameter files in [bicep/parameters/dev.bicepparam](bicep/parameters/dev.bicepparam) and [bicep/parameters/prod.bicepparam](bicep/parameters/prod.bicepparam)
 - Reusable Bicep modules in [bicep/modules](bicep/modules)
 - Infra deployment workflow in [/.github/workflows/infra-deploy.yml](.github/workflows/infra-deploy.yml)
-- Post-deploy configuration and image build workflow in [/.github/workflows/configure-infra.yml](.github/workflows/configure-infra.yml)
-- EPUB ingestion workflow in [/.github/workflows/ingest-books.yml](.github/workflows/ingest-books.yml)
+- Post-deploy configuration and image build workflow in [/.github/workflows/infra-configure.yml](.github/workflows/infra-configure.yml)
+- EPUB ingestion workflow in [/.github/workflows/infra-ingest.yml](.github/workflows/infra-ingest.yml)
 - Keycloak image inputs in [keycloak/Dockerfile](keycloak/Dockerfile) and [keycloak/adventra-realm.json](keycloak/adventra-realm.json)
 
 Primary Azure resources provisioned by Bicep include:
@@ -34,7 +34,8 @@ Primary Azure resources provisioned by Bicep include:
 AdventraInfra/
    .github/workflows/
       infra-deploy.yml
-      configure-infra.yml
+      infra-configure.yml
+      infra-ingest.yml
    bicep/
       main.bicep
       modules/
@@ -69,7 +70,7 @@ Behavior:
 
 ### 2) Configure PostgreSQL + Key Vault + Build Keycloak Image
 
-Run [/.github/workflows/configure-infra.yml](.github/workflows/configure-infra.yml) after infra deployment.
+Run [/.github/workflows/infra-configure.yml](.github/workflows/infra-configure.yml) after infra deployment.
 
 Triggers:
 
@@ -92,7 +93,7 @@ Behavior:
 ### 3) Ingest Books
 
 Add EPUB files under `books/<collection>/`. The
-[Ingest Books](.github/workflows/ingest-books.yml) workflow runs automatically
+[Ingest Books](.github/workflows/infra-ingest.yml) workflow runs automatically
 for changes merged to `dev` and can be started manually for `dev` or `prod`.
 
 The workflow:

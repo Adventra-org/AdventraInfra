@@ -7,7 +7,7 @@ on:
       - main
     paths:
       - 'keycloak/**'
-      - '.github/workflows/configure-infra.yml'
+      - '.github/workflows/infra-configure.yml'
   workflow_dispatch:
     inputs:
       lockdownPostgres:
@@ -173,11 +173,10 @@ jobs:
 
           az postgres flexible-server firewall-rule create \
             --resource-group "${{ env.resourceGroupName }}" \
-            --name "$PG_SERVER" \
-            --rule-name "AllowAll_all_ips" \
+            --server-name "$PG_SERVER" \
+            --name "AllowAll_all_ips" \
             --start-ip-address "0.0.0.0" \
-            --end-ip-address "255.255.255.255" \
-            || true
+            --end-ip-address "255.255.255.255"
 
           IDENTITY_INFO=$(az identity show \
             --name "$IDENTITY_NAME" \
@@ -473,11 +472,10 @@ jobs:
 
           az postgres flexible-server firewall-rule create \
             --resource-group "$RESOURCE_GROUP" \
-            --name "$POSTGRES_SERVER" \
-            --rule-name "AllowAll_all_ips" \
+            --server-name "$POSTGRES_SERVER" \
+            --name "AllowAll_all_ips" \
             --start-ip-address "0.0.0.0" \
-            --end-ip-address "255.255.255.255" \
-            || true
+            --end-ip-address "255.255.255.255"
 
           az postgres flexible-server update \
             --resource-group "$RESOURCE_GROUP" \

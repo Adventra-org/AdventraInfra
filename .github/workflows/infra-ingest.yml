@@ -7,7 +7,7 @@ on:
     paths:
       - 'books/**/*.epub'
       - 'ingestion/**'
-      - '.github/workflows/ingest-books.yml'
+      - '.github/workflows/infra-ingest.yml'
   workflow_dispatch:
     inputs:
       environment:
