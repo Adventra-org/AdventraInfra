@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.40.2.10011",
-      "templateHash": "2002577340327946919"
+      "version": "0.39.26.7824",
+      "templateHash": "2983631925727182559"
     }
   },
   "parameters": {
@@ -141,6 +141,35 @@
         "description": "Azure OpenAI deployment SKU."
       }
     },
+    "embeddingDeploymentName": {
+      "type": "string",
+      "defaultValue": "text-embedding-3-small",
+      "metadata": {
+        "description": "Azure OpenAI embedding deployment name."
+      }
+    },
+    "embeddingModelName": {
+      "type": "string",
+      "defaultValue": "text-embedding-3-small",
+      "metadata": {
+        "description": "Azure OpenAI embedding model name."
+      }
+    },
+    "embeddingModelVersion": {
+      "type": "string",
+      "defaultValue": "1",
+      "metadata": {
+        "description": "Azure OpenAI embedding model version."
+      }
+    },
+    "embeddingDeploymentCapacity": {
+      "type": "int",
+      "defaultValue": 120,
+      "minValue": 1,
+      "metadata": {
+        "description": "Azure OpenAI embedding deployment capacity in thousands of tokens per minute."
+      }
+    },
     "postgresqlRoleDefinitionId": {
       "type": "string",
       "defaultValue": "b24988ac-6180-42a0-ab88-20f7382dd24c",
@@ -205,8 +234,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "5820673551150713866"
+              "version": "0.39.26.7824",
+              "templateHash": "5718372358992104290"
             }
           },
           "parameters": {
@@ -261,8 +290,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "8405510888234491028"
+              "version": "0.39.26.7824",
+              "templateHash": "2683307959201301670"
             }
           },
           "parameters": {
@@ -336,8 +365,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "11143440915520708102"
+              "version": "0.39.26.7824",
+              "templateHash": "17769880846464355286"
             }
           },
           "parameters": {
@@ -408,8 +437,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "1402246500780806088"
+              "version": "0.39.26.7824",
+              "templateHash": "7757726083636039128"
             }
           },
           "parameters": {
@@ -492,8 +521,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "17546183448866915438"
+              "version": "0.39.26.7824",
+              "templateHash": "8907641070703960084"
             }
           },
           "parameters": {
@@ -567,8 +596,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "14057423905069448403"
+              "version": "0.39.26.7824",
+              "templateHash": "16072229698434379601"
             }
           },
           "parameters": {
@@ -638,8 +667,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "11801321165127272516"
+              "version": "0.39.26.7824",
+              "templateHash": "16674701342878880909"
             }
           },
           "parameters": {
@@ -726,8 +755,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "1234489053570981497"
+              "version": "0.39.26.7824",
+              "templateHash": "5302337957366101993"
             }
           },
           "parameters": {
@@ -793,8 +822,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "13823294628190922124"
+              "version": "0.39.26.7824",
+              "templateHash": "5644051824598609400"
             }
           },
           "parameters": {
@@ -879,8 +908,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "16464230623030487870"
+              "version": "0.39.26.7824",
+              "templateHash": "3309777120271341627"
             }
           },
           "parameters": {
@@ -991,8 +1020,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "6005272036202573998"
+              "version": "0.39.26.7824",
+              "templateHash": "17587510052149497321"
             }
           },
           "parameters": {
@@ -1020,7 +1049,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', last(split(parameters('postgresqlServerId'), '/')))]",
+              "scope": "[format('Microsoft.DBforPostgreSQL/flexibleServers/{0}', last(split(parameters('postgresqlServerId'), '/')))]",
               "name": "[guid(parameters('postgresqlServerId'), parameters('principalId'), parameters('roleDefinitionId'))]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('roleDefinitionId'))]",
@@ -1075,8 +1104,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "14264592342989440617"
+              "version": "0.39.26.7824",
+              "templateHash": "9391773938454837418"
             }
           },
           "parameters": {
@@ -1223,8 +1252,140 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "347821080471077180"
+              "version": "0.39.26.7824",
+              "templateHash": "7080937623255437817"
+            }
+          },
+          "parameters": {
+            "accountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Azure OpenAI account"
+              }
+            },
+            "deploymentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the deployment"
+              }
+            },
+            "modelFormat": {
+              "type": "string",
+              "defaultValue": "OpenAI",
+              "metadata": {
+                "description": "Model format"
+              }
+            },
+            "modelName": {
+              "type": "string",
+              "metadata": {
+                "description": "Model name"
+              }
+            },
+            "modelVersion": {
+              "type": "string",
+              "metadata": {
+                "description": "Model version"
+              }
+            },
+            "skuName": {
+              "type": "string",
+              "defaultValue": "Standard",
+              "allowedValues": [
+                "Standard",
+                "GlobalStandard"
+              ],
+              "metadata": {
+                "description": "SKU name for the deployment"
+              }
+            },
+            "capacity": {
+              "type": "int",
+              "defaultValue": 120,
+              "metadata": {
+                "description": "Capacity (tokens per minute in thousands)"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('accountName'), parameters('deploymentName'))]",
+              "sku": {
+                "name": "[parameters('skuName')]",
+                "capacity": "[parameters('capacity')]"
+              },
+              "properties": {
+                "model": {
+                  "format": "[parameters('modelFormat')]",
+                  "name": "[parameters('modelName')]",
+                  "version": "[parameters('modelVersion')]"
+                },
+                "raiPolicyName": "Microsoft.Default"
+              }
+            }
+          ],
+          "outputs": {
+            "deploymentId": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment ID"
+              },
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('accountName'), parameters('deploymentName'))]"
+            },
+            "deploymentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Deployment name"
+              },
+              "value": "[parameters('deploymentName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cognitiveServicesDeploy')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "embeddingDeploymentDeploy",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "accountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cognitiveServicesDeploy'), '2025-04-01').outputs.accountName.value]"
+          },
+          "deploymentName": {
+            "value": "[parameters('embeddingDeploymentName')]"
+          },
+          "modelName": {
+            "value": "[parameters('embeddingModelName')]"
+          },
+          "modelVersion": {
+            "value": "[parameters('embeddingModelVersion')]"
+          },
+          "skuName": {
+            "value": "Standard"
+          },
+          "capacity": {
+            "value": "[parameters('embeddingDeploymentCapacity')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "7080937623255437817"
             }
           },
           "parameters": {
@@ -1343,8 +1504,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "8036962759416625199"
+              "version": "0.39.26.7824",
+              "templateHash": "9011150224182430335"
             }
           },
           "parameters": {
@@ -1372,7 +1533,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]",
+              "scope": "[format('Microsoft.CognitiveServices/accounts/{0}', parameters('accountName'))]",
               "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName')), parameters('principalId'), parameters('roleDefinitionId'))]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('roleDefinitionId'))]",
@@ -1424,8 +1585,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "4250906608029159039"
+              "version": "0.39.26.7824",
+              "templateHash": "15855111600603665654"
             }
           },
           "parameters": {
@@ -1446,7 +1607,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.KeyVault/vaults', last(split(parameters('keyVaultId'), '/')))]",
+              "scope": "[format('Microsoft.KeyVault/vaults/{0}', last(split(parameters('keyVaultId'), '/')))]",
               "name": "[guid(parameters('keyVaultId'), parameters('principalResourceId'), variables('keyVaultSecretsUserRoleDefinitionId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
@@ -1490,8 +1651,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "15541659289432378758"
+              "version": "0.39.26.7824",
+              "templateHash": "3551847664353552793"
             }
           },
           "parameters": {
@@ -1512,7 +1673,7 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', last(split(parameters('storageAccountId'), '/')))]",
+              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', last(split(parameters('storageAccountId'), '/')))]",
               "name": "[guid(parameters('storageAccountId'), parameters('principalResourceId'), variables('storageBlobDataContributorRoleDefinitionId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
@@ -1569,8 +1730,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "3877223401603273109"
+              "version": "0.39.26.7824",
+              "templateHash": "12742423465665557082"
             }
           },
           "parameters": {
@@ -1763,8 +1924,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "11003514243216570877"
+              "version": "0.39.26.7824",
+              "templateHash": "1509453482657857974"
             }
           },
           "parameters": {
@@ -1918,8 +2079,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "829028296659362772"
+              "version": "0.39.26.7824",
+              "templateHash": "12576756134660988383"
             }
           },
           "parameters": {
@@ -1934,7 +2095,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', last(split(parameters('storageAccountId'), '/')))]",
+              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', last(split(parameters('storageAccountId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -1983,8 +2144,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "10384806367650438512"
+              "version": "0.39.26.7824",
+              "templateHash": "11600139122424116715"
             }
           },
           "parameters": {
@@ -1999,7 +2160,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[resourceId('Microsoft.KeyVault/vaults', last(split(parameters('keyVaultId'), '/')))]",
+              "scope": "[format('Microsoft.KeyVault/vaults/{0}', last(split(parameters('keyVaultId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2050,8 +2211,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "5033297993726591538"
+              "version": "0.39.26.7824",
+              "templateHash": "15259535996633557613"
             }
           },
           "parameters": {
@@ -2066,7 +2227,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', last(split(parameters('postgresServerId'), '/')))]",
+              "scope": "[format('Microsoft.DBforPostgreSQL/flexibleServers/{0}', last(split(parameters('postgresServerId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2117,8 +2278,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "1621653967312560247"
+              "version": "0.39.26.7824",
+              "templateHash": "15111028948296754803"
             }
           },
           "parameters": {
@@ -2133,7 +2294,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[resourceId('Microsoft.App/managedEnvironments', last(split(parameters('containerAppsEnvironmentId'), '/')))]",
+              "scope": "[format('Microsoft.App/managedEnvironments/{0}', last(split(parameters('containerAppsEnvironmentId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2185,8 +2346,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.40.2.10011",
-              "templateHash": "15375569952048653866"
+              "version": "0.39.26.7824",
+              "templateHash": "10434487255100506311"
             }
           },
           "parameters": {
@@ -2201,7 +2362,7 @@
             {
               "type": "Microsoft.Insights/diagnosticSettings",
               "apiVersion": "2021-05-01-preview",
-              "scope": "[resourceId('Microsoft.Cdn/profiles', last(split(parameters('frontDoorProfileId'), '/')))]",
+              "scope": "[format('Microsoft.Cdn/profiles/{0}', last(split(parameters('frontDoorProfileId'), '/')))]",
               "name": "diag-to-law",
               "properties": {
                 "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
@@ -2261,6 +2422,10 @@
     "openAiDeployment": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'openAiDeploymentDeploy'), '2025-04-01').outputs.deploymentName.value]"
+    },
+    "embeddingDeployment": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'embeddingDeploymentDeploy'), '2025-04-01').outputs.deploymentName.value]"
     }
   }
 }

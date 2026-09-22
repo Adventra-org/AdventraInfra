@@ -69,6 +69,19 @@ param openAiModelVersion string = '2024-07-18'
 ])
 param openAiDeploymentSku string = 'GlobalStandard'
 
+@description('Azure OpenAI embedding deployment name.')
+param embeddingDeploymentName string = 'text-embedding-3-small'
+
+@description('Azure OpenAI embedding model name.')
+param embeddingModelName string = 'text-embedding-3-small'
+
+@description('Azure OpenAI embedding model version.')
+param embeddingModelVersion string = '1'
+
+@description('Azure OpenAI embedding deployment capacity in thousands of tokens per minute.')
+@minValue(1)
+param embeddingDeploymentCapacity int = 120
+
 @description('Role definition ID for PostgreSQL scope assignment. Defaults to Contributor.')
 param postgresqlRoleDefinitionId string = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
 
@@ -250,6 +263,19 @@ module openAiDeploymentModule './modules/openaiDeployment.bicep' = {
   }
 }
 
+module embeddingDeploymentModule './modules/openaiDeployment.bicep' = {
+  scope: resourceGroup(resourceGroupName)
+  name: 'embeddingDeploymentDeploy'
+  params: {
+    accountName: cognitiveServicesModule.outputs.accountName
+    deploymentName: embeddingDeploymentName
+    modelName: embeddingModelName
+    modelVersion: embeddingModelVersion
+    skuName: 'Standard'
+    capacity: embeddingDeploymentCapacity
+  }
+}
+
 module cognitiveServicesRoleAssignmentModule './modules/cognitiveServicesRoleAssignment.bicep' = {
   scope: resourceGroup(resourceGroupName)
   name: 'cognitiveServicesRoleAssignmentDeploy'
@@ -376,3 +402,4 @@ output userAssignedIdentityPrincipalId string = userAssignedIdentityModule.outpu
 output acrLoginServer string = acrModule.outputs.acrUrl
 output openAiEndpoint string = cognitiveServicesModule.outputs.endpoint
 output openAiDeployment string = openAiDeploymentModule.outputs.deploymentName
+output embeddingDeployment string = embeddingDeploymentModule.outputs.deploymentName
