@@ -78,6 +78,13 @@ param embeddingModelName string = 'text-embedding-3-small'
 @description('Azure OpenAI embedding model version.')
 param embeddingModelVersion string = '1'
 
+@description('Azure OpenAI embedding deployment SKU.')
+@allowed([
+  'GlobalStandard'
+  'Standard'
+])
+param embeddingDeploymentSku string = 'GlobalStandard'
+
 @description('Azure OpenAI embedding deployment capacity in thousands of tokens per minute.')
 @minValue(1)
 param embeddingDeploymentCapacity int = 120
@@ -271,7 +278,7 @@ module embeddingDeploymentModule './modules/openaiDeployment.bicep' = {
     deploymentName: embeddingDeploymentName
     modelName: embeddingModelName
     modelVersion: embeddingModelVersion
-    skuName: 'Standard'
+    skuName: embeddingDeploymentSku
     capacity: embeddingDeploymentCapacity
   }
 }

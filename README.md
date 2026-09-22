@@ -108,7 +108,9 @@ The workflow:
 - skips an unchanged active book based on its SHA-256 checksum.
 
 Run the **Infra Deploy** workflow once after adding this pipeline so Azure
-creates the `text-embedding-3-small` deployment before the first ingestion run.
+creates the `text-embedding-3-small` deployment with the `GlobalStandard` SKU
+before the first ingestion run. Central US does not support the regional
+`Standard` SKU for this model.
 The ingestion workflow verifies that deployment exists and fails explicitly if
 the infrastructure prerequisite has not been applied.
 

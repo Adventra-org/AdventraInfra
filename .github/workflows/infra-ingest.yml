@@ -1,4 +1,4 @@
-name: Ingest Books
+name: Ingest Infra
 
 on:
   push:
