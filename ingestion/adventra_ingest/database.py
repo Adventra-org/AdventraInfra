@@ -189,79 +189,81 @@ def store_book(
                         chapter.title,
                     ),
                 )
-                connection.executemany(
-                    """
-                    INSERT INTO passages (
-                        passage_id, edition_id, chapter_id, book_id, language,
-                        chapter_number, paragraph_number, sequence, text,
-                        content_hash, is_active
-                    )
-                    VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
-                    )
-                    ON CONFLICT (passage_id) DO UPDATE SET
-                        edition_id = EXCLUDED.edition_id,
-                        chapter_id = EXCLUDED.chapter_id,
-                        text = EXCLUDED.text,
-                        content_hash = EXCLUDED.content_hash,
-                        is_active = TRUE,
-                        updated_at = NOW()
-                    """,
-                    [
-                        (
-                            passage.passage_id,
-                            edition_id,
-                            chapter.chapter_id,
-                            book.book_id,
-                            book.language,
-                            chapter.number,
-                            passage.paragraph_number,
-                            passage.sequence,
-                            passage.text,
-                            passage.content_hash,
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        """
+                        INSERT INTO passages (
+                            passage_id, edition_id, chapter_id, book_id,
+                            language, chapter_number, paragraph_number,
+                            sequence, text, content_hash, is_active
                         )
-                        for passage in chapter.passages
-                    ],
-                )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
+                        )
+                        ON CONFLICT (passage_id) DO UPDATE SET
+                            edition_id = EXCLUDED.edition_id,
+                            chapter_id = EXCLUDED.chapter_id,
+                            text = EXCLUDED.text,
+                            content_hash = EXCLUDED.content_hash,
+                            is_active = TRUE,
+                            updated_at = NOW()
+                        """,
+                        [
+                            (
+                                passage.passage_id,
+                                edition_id,
+                                chapter.chapter_id,
+                                book.book_id,
+                                book.language,
+                                chapter.number,
+                                passage.paragraph_number,
+                                passage.sequence,
+                                passage.text,
+                                passage.content_hash,
+                            )
+                            for passage in chapter.passages
+                        ],
+                    )
 
             connection.execute(
                 "DELETE FROM rag_chunks WHERE book_id = %s AND language = %s",
                 (book.book_id, book.language),
             )
-            connection.executemany(
-                """
-                INSERT INTO rag_chunks (
-                    chunk_id, edition_id, chapter_id, book_id, language,
-                    chunk_number, passage_ids, title, text, token_count,
-                    content_hash, embedding, embedding_model,
-                    embedding_dimensions, content_version
-                )
-                VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s::vector, %s, %s, %s
-                )
-                """,
-                [
-                    (
-                        chunk.chunk_id,
-                        edition_id,
-                        chunk.chapter_id,
-                        book.book_id,
-                        book.language,
-                        chunk.chunk_number,
-                        list(chunk.passage_ids),
-                        chunk.title,
-                        chunk.text,
-                        chunk.token_count,
-                        chunk.content_hash,
-                        _vector_literal(chunk.embedding),
-                        embedding_model,
-                        EMBEDDING_DIMENSIONS,
-                        book.content_version,
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO rag_chunks (
+                        chunk_id, edition_id, chapter_id, book_id, language,
+                        chunk_number, passage_ids, title, text, token_count,
+                        content_hash, embedding, embedding_model,
+                        embedding_dimensions, content_version
                     )
-                    for chunk in chunks
-                ],
-            )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s::vector, %s, %s, %s
+                    )
+                    """,
+                    [
+                        (
+                            chunk.chunk_id,
+                            edition_id,
+                            chunk.chapter_id,
+                            book.book_id,
+                            book.language,
+                            chunk.chunk_number,
+                            list(chunk.passage_ids),
+                            chunk.title,
+                            chunk.text,
+                            chunk.token_count,
+                            chunk.content_hash,
+                            _vector_literal(chunk.embedding),
+                            embedding_model,
+                            EMBEDDING_DIMENSIONS,
+                            book.content_version,
+                        )
+                        for chunk in chunks
+                    ],
+                )
             passage_count = sum(
                 len(chapter.passages) for chapter in book.chapters
             )
@@ -306,4 +308,3 @@ def _validate_embeddings(chunks: tuple[RagChunk, ...]) -> None:
 
 def _vector_literal(values: tuple[float, ...]) -> str:
     return "[" + ",".join(format(value, ".9g") for value in values) + "]"
-
