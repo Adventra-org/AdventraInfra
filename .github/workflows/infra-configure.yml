@@ -413,7 +413,41 @@ jobs:
           set_secret_with_retry "keycloak-db-username" "$IDENTITY_NAME"
           set_secret_with_retry "keycloak-managed-identity-name" "$IDENTITY_NAME"
 
-          for s in keycloak-db-name keycloak-db-host keycloak-db-username keycloak-managed-identity-name; do
+          set +x
+          POSTGRES_PASSWORD='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "❌ POSTGRES_ADMIN_PASSWORD is required to configure the backend"
+            exit 1
+          fi
+          ENCODED_PASSWORD=$(POSTGRES_PASSWORD="$POSTGRES_PASSWORD" python3 -c \
+            'import os, urllib.parse; print(urllib.parse.quote(os.environ["POSTGRES_PASSWORD"], safe=""))')
+          BACKEND_DATABASE_URL="postgresql://aradmin:${ENCODED_PASSWORD}@${PG_SERVER}.postgres.database.azure.com:5432/adventra?sslmode=require"
+          set_secret_with_retry "backend-database-url" "$BACKEND_DATABASE_URL"
+          unset POSTGRES_PASSWORD ENCODED_PASSWORD BACKEND_DATABASE_URL
+
+          if ! az keyvault secret show \
+            --vault-name "$KV_NAME" \
+            --name backend-jwt-secret \
+            --only-show-errors >/dev/null 2>&1; then
+            set_secret_with_retry "backend-jwt-secret" "$(openssl rand -hex 32)"
+          fi
+
+          if ! az keyvault secret show \
+            --vault-name "$KV_NAME" \
+            --name keycloak-bootstrap-admin-password \
+            --only-show-errors >/dev/null 2>&1; then
+            set_secret_with_retry "keycloak-bootstrap-admin-password" "$(openssl rand -hex 24)"
+          fi
+          set -x
+
+          for s in \
+            keycloak-db-name \
+            keycloak-db-host \
+            keycloak-db-username \
+            keycloak-managed-identity-name \
+            keycloak-bootstrap-admin-password \
+            backend-database-url \
+            backend-jwt-secret; do
             if ! az keyvault secret show --vault-name "$KV_NAME" --name "$s" --query id -o tsv >/dev/null 2>&1; then
               echo "❌ Secret missing after retries: $s"
               echo "Caller assignee (from current az context): $CALLER_ASSIGNEE"
@@ -426,7 +460,7 @@ jobs:
             fi
           done
 
-          echo "✅ Keycloak DB config stored in Key Vault"
+          echo "✅ Application runtime configuration stored in Key Vault"
 
   lockdown-postgresql:
     name: Lockdown PostgreSQL (Entra ID Only)
@@ -610,3 +644,160 @@ jobs:
             echo "❌ Failed to build and/or push image to ACR"
             exit 1
           fi
+
+  deploy-keycloak:
+    name: Deploy Keycloak to Container Apps
+    needs:
+      - configure-pgsql
+      - build-and-push-keycloak
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.subscriptionId }}
+
+      - name: Deploy Keycloak revision
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RESOURCE_GROUP="${{ env.resourceGroupName }}"
+          APP_NAME="adventra-keycloak"
+          KV_NAME="${{ needs.configure-pgsql.outputs.keyVaultName }}"
+          PG_SERVER="${{ needs.configure-pgsql.outputs.postgresServerName }}"
+          IDENTITY_NAME="${{ needs.configure-pgsql.outputs.keycloakManagedIdentityName }}"
+          ENVIRONMENT_NAME=$(az containerapp env list \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "[0].name" -o tsv)
+          IDENTITY_ID=$(az identity show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$IDENTITY_NAME" \
+            --query id -o tsv)
+          IDENTITY_CLIENT_ID=$(az identity show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$IDENTITY_NAME" \
+            --query clientId -o tsv)
+          ACR_NAME=$(az acr list \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "[0].name" -o tsv)
+          ACR_URI=$(az acr show \
+            --name "$ACR_NAME" \
+            --query loginServer -o tsv)
+          IMAGE="$ACR_URI/${{ env.keycloakImageName }}:${{ github.run_number }}"
+          ADMIN_PASSWORD_SECRET_ID=$(az keyvault secret show \
+            --vault-name "$KV_NAME" \
+            --name keycloak-bootstrap-admin-password \
+            --query id -o tsv)
+          JDBC_URL="jdbc:postgresql://${PG_SERVER}.postgres.database.azure.com:5432/keycloak?sslmode=require&authenticationPluginClassName=com.azure.identity.extensions.jdbc.postgresql.AzurePostgresqlAuthenticationPlugin"
+
+          if [[ -z "$ENVIRONMENT_NAME" || -z "$IDENTITY_ID" || -z "$ACR_URI" ]]; then
+            echo "❌ Container Apps environment, managed identity, or ACR was not found"
+            exit 1
+          fi
+
+          if az containerapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --only-show-errors >/dev/null 2>&1; then
+            az containerapp identity assign \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --user-assigned "$IDENTITY_ID" \
+              --only-show-errors >/dev/null
+            az containerapp registry set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --server "$ACR_URI" \
+              --identity "$IDENTITY_ID" \
+              --only-show-errors >/dev/null
+            az containerapp secret set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --secrets \
+                "bootstrap-admin-password=keyvaultref:$ADMIN_PASSWORD_SECRET_ID,identityref:$IDENTITY_ID" \
+              --only-show-errors >/dev/null
+            az containerapp update \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --image "$IMAGE" \
+              --min-replicas 1 \
+              --max-replicas 2 \
+              --set-env-vars \
+                "KC_DB=postgres" \
+                "KC_DB_URL=$JDBC_URL" \
+                "KC_DB_USERNAME=$IDENTITY_NAME" \
+                "KC_BOOTSTRAP_ADMIN_USERNAME=adventra-admin" \
+                "KC_BOOTSTRAP_ADMIN_PASSWORD=secretref:bootstrap-admin-password" \
+                "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID" \
+                "KC_HEALTH_ENABLED=true" \
+                "KC_METRICS_ENABLED=true" \
+                "KC_HTTP_PORT=8080" \
+              --only-show-errors >/dev/null
+          else
+            az containerapp create \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$APP_NAME" \
+              --environment "$ENVIRONMENT_NAME" \
+              --image "$IMAGE" \
+              --user-assigned "$IDENTITY_ID" \
+              --registry-server "$ACR_URI" \
+              --registry-identity "$IDENTITY_ID" \
+              --ingress external \
+              --target-port 8080 \
+              --transport auto \
+              --min-replicas 1 \
+              --max-replicas 2 \
+              --secrets \
+                "bootstrap-admin-password=keyvaultref:$ADMIN_PASSWORD_SECRET_ID,identityref:$IDENTITY_ID" \
+              --env-vars \
+                "KC_DB=postgres" \
+                "KC_DB_URL=$JDBC_URL" \
+                "KC_DB_USERNAME=$IDENTITY_NAME" \
+                "KC_BOOTSTRAP_ADMIN_USERNAME=adventra-admin" \
+                "KC_BOOTSTRAP_ADMIN_PASSWORD=secretref:bootstrap-admin-password" \
+                "AZURE_CLIENT_ID=$IDENTITY_CLIENT_ID" \
+                "KC_HEALTH_ENABLED=true" \
+                "KC_METRICS_ENABLED=true" \
+                "KC_HTTP_PORT=8080" \
+              --only-show-errors >/dev/null
+          fi
+
+          FQDN=$(az containerapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
+          echo "✅ Deployed $IMAGE to https://$FQDN"
+
+      - name: Verify Keycloak revision
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_URL="https://${{ steps.deploy.outputs.fqdn }}"
+          DISCOVERY_URL="$APP_URL/realms/adventra/.well-known/openid-configuration"
+          for attempt in {1..36}; do
+            if curl --fail --silent --show-error "$DISCOVERY_URL" >/dev/null; then
+              echo "✅ Keycloak discovery endpoint is healthy: $DISCOVERY_URL"
+              exit 0
+            fi
+            echo "Waiting for Keycloak revision to become healthy ($attempt/36)..."
+            sleep 10
+          done
+
+          az containerapp revision list \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name adventra-keycloak \
+            --query "[].{name:name,active:properties.active,healthState:properties.healthState,provisioningState:properties.provisioningState}" \
+            -o table
+          az containerapp logs show \
+            --resource-group "${{ env.resourceGroupName }}" \
+            --name adventra-keycloak \
+            --tail 100 || true
+          echo "❌ Keycloak did not become healthy at $DISCOVERY_URL"
+          exit 1

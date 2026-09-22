@@ -68,7 +68,7 @@ Behavior:
 - Injects `postgresAdminPassword` from GitHub secret
 - For `dev`, applies a run-based Key Vault salt to avoid name-collision issues
 
-### 2) Configure PostgreSQL + Key Vault + Build Keycloak Image
+### 2) Configure PostgreSQL + Deploy Keycloak
 
 Run [/.github/workflows/infra-configure.yml](.github/workflows/infra-configure.yml) after infra deployment.
 
@@ -86,11 +86,31 @@ Behavior:
 - Discovers current PostgreSQL, Key Vault, and managed identity names dynamically in `adventra-dev`
 - Enables Entra auth and configures PostgreSQL databases/permissions
 - Allow-lists PostGIS and creates extension in `adventra`
-- Ensures required Key Vault secret values exist for Keycloak
+- Ensures required Key Vault secret values exist for Keycloak and the backend
 - Optionally locks down PostgreSQL to Entra-only auth when `lockdownPostgres=true`
 - Builds and pushes Keycloak image to ACR
+- Creates or updates the `adventra-keycloak` Container App
+- Verifies the deployed Keycloak realm discovery endpoint
 
-### 3) Ingest Books
+Keep `lockdownPostgres=false` while the Rust backend uses its password-based
+`DATABASE_URL`. Entra-only PostgreSQL requires adding renewable managed
+identity tokens to the backend connection pool first.
+
+### 3) Deploy the Backend API
+
+Run the `adventra-backend-build-deploy` workflow in the `AdventraBackend`
+repository after Configure Infra succeeds.
+
+The backend workflow:
+
+- runs the Rust test suite,
+- builds and pushes `adventra-rust-backend` to the shared ACR,
+- creates or updates the `adventra-api` Container App,
+- references its database URL and JWT secret from Key Vault,
+- keeps at least one replica running, and
+- verifies `GET /health` on the deployed revision.
+
+### 4) Ingest Books
 
 Add EPUB files under `books/<collection>/`. The
 [Ingest Books](.github/workflows/infra-ingest.yml) workflow runs automatically
@@ -150,5 +170,5 @@ The GitHub OIDC service principal should have, at minimum:
 
 ## Notes
 
-- Both workflows opt into Node 24 action runtime using `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`.
+- All workflows opt into Node 24 action runtime using `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`.
 - [scripts/deploy.sh](scripts/deploy.sh) exists, but current operational path is GitHub Actions workflows above.
