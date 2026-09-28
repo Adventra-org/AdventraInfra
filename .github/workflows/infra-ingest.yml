@@ -208,6 +208,31 @@ jobs:
             --source-root . \
             "${EXTRA_ARGS[@]}"
 
+      - name: Grant backend read access to content tables
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The backend API connects as the server administrator login, which
+          # is not a superuser on Flexible Server and cannot read tables owned
+          # by the ingestion principal without an explicit grant.
+          BACKEND_ROLE=$(az postgres flexible-server show \
+            --resource-group "${{ steps.resources.outputs.resource_group }}" \
+            --name "${{ steps.resources.outputs.postgres_server }}" \
+            --query administratorLogin \
+            --output tsv)
+          if [[ -z "$BACKEND_ROLE" ]]; then
+            echo "Unable to determine the backend PostgreSQL role"
+            exit 1
+          fi
+
+          psql -v ON_ERROR_STOP=1 -c "
+            GRANT USAGE ON SCHEMA public TO \"$BACKEND_ROLE\";
+            GRANT SELECT ON books, book_editions, chapters, passages, rag_chunks, content_imports
+              TO \"$BACKEND_ROLE\";
+          "
+          echo "✅ Granted SELECT on content tables to $BACKEND_ROLE"
+
       - name: Verify imported content
         shell: bash
         run: |
