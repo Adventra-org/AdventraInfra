@@ -20,6 +20,7 @@ _HEADING_TAGS = {"h1", "h2", "h3"}
 _PASSAGE_TAGS = {"p", "blockquote", "li"}
 _SPACE = re.compile(r"\s+")
 _CHAPTER_NUMBER = re.compile(r"\bchapter\s+(\d+)\b", re.IGNORECASE)
+_ATTACHED_CLASSES = {"poem-source"}
 _NON_CONTENT_IDS = {"cover", "titlepage", "toc", "nav", "aboutbook"}
 
 
@@ -136,16 +137,53 @@ def _parse_chapters(
     book_id: str,
     language: str,
 ) -> list[Chapter]:
-    chapters: list[Chapter] = []
-    for document in documents:
-        root = ElementTree.fromstring(archive.read(str(document)))
-        title = _document_title(root)
-        paragraphs = [
-            text
+    roots = [
+        ElementTree.fromstring(archive.read(str(document)))
+        for document in documents
+    ]
+    first_page = next(
+        (
+            page
+            for root in roots
             for element in root.iter()
-            if _local_name(element.tag) in _PASSAGE_TAGS
-            and (text := _element_text(element))
-        ]
+            if (page := _page_number(element)) is not None
+        ),
+        None,
+    )
+    # Text before the first page marker sits on the preceding printed page.
+    current_page = first_page - 1 if first_page is not None else None
+    paragraphs_on_page: dict[int, int] = {}
+
+    chapters: list[Chapter] = []
+    for root in roots:
+        title = _document_title(root)
+        paragraphs: list[tuple[str, int | None, int | None, int | None]] = []
+        for element in root.iter():
+            if (page := _page_number(element)) is not None:
+                current_page = page
+                continue
+            if _local_name(element.tag) not in _PASSAGE_TAGS:
+                continue
+            text = _element_text(element)
+            if not text:
+                continue
+            page_start, page_end = _page_span(element, current_page)
+            classes = set(element.attrib.get("class", "").lower().split())
+            if classes & _ATTACHED_CLASSES and paragraphs:
+                # A quotation's source line belongs to the paragraph it cites.
+                previous = paragraphs[-1]
+                paragraphs[-1] = (
+                    f"{previous[0]} {text}",
+                    previous[1],
+                    page_end if page_end is not None else previous[2],
+                    previous[3],
+                )
+                continue
+            page_paragraph = None
+            if page_start is not None:
+                page_paragraph = paragraphs_on_page.get(page_start, 0) + 1
+                paragraphs_on_page[page_start] = page_paragraph
+            paragraphs.append((text, page_start, page_end, page_paragraph))
         if not title or not paragraphs:
             continue
 
@@ -163,8 +201,13 @@ def _parse_chapters(
                 sequence=index,
                 text=text,
                 content_hash=_sha256(text),
+                page_start=page_start,
+                page_end=page_end,
+                page_paragraph=page_paragraph,
             )
-            for index, text in enumerate(paragraphs, start=1)
+            for index, (text, page_start, page_end, page_paragraph) in enumerate(
+                paragraphs, start=1
+            )
         )
         chapters.append(
             Chapter(
@@ -175,6 +218,52 @@ def _parse_chapters(
             )
         )
     return chapters
+
+
+def _page_number(element: ElementTree.Element) -> int | None:
+    classes = set(element.attrib.get("class", "").lower().split())
+    epub_type = next(
+        (value for key, value in element.attrib.items() if _local_name(key) == "type"),
+        "",
+    )
+    if "pagebreak" not in classes and "pagebreak" not in epub_type.split():
+        return None
+    title = element.attrib.get("title", "").strip()
+    return int(title) if title.isdigit() else None
+
+
+def _page_span(
+    element: ElementTree.Element, current_page: int | None
+) -> tuple[int | None, int | None]:
+    """Return the printed pages on which a paragraph's text starts and ends."""
+    running = current_page
+    start: int | None = None
+    end: int | None = None
+
+    def saw_text(value: str | None) -> None:
+        nonlocal start, end
+        if _clean_text(value):
+            if start is None:
+                start = running
+            end = running
+
+    def visit(node: ElementTree.Element) -> None:
+        nonlocal running
+        page = _page_number(node)
+        if page is not None:
+            running = page
+        else:
+            saw_text(node.text)
+            for child in node:
+                visit(child)
+        saw_text(node.tail)
+
+    saw_text(element.text)
+    for child in element:
+        visit(child)
+    if start is None:
+        return current_page, current_page
+    return start, end
 
 
 def _document_title(root: ElementTree.Element) -> str:

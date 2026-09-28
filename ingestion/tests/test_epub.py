@@ -48,3 +48,32 @@ def test_builds_bounded_chunks_with_passage_citations() -> None:
         for current, following in zip(chunks, chunks[1:])
         if current.chapter_id == following.chapter_id
     )
+
+
+def test_passages_carry_printed_page_citations() -> None:
+    book = parse_epub(SAMPLE_BOOK)
+    chapter_one = next(chapter for chapter in book.chapters if chapter.number == 1)
+    citations = [
+        (passage.page_start, passage.page_paragraph, passage.page_end)
+        for passage in chapter_one.passages[:5]
+    ]
+
+    assert citations == [(9, 1, 9), (9, 2, 9), (9, 3, 10), (10, 1, 10), (10, 2, 10)]
+    assert chapter_one.passages[3].text.startswith("“God is love”")
+    assert all(
+        passage.page_start is not None and passage.page_paragraph is not None
+        for chapter in book.chapters
+        for passage in chapter.passages
+    )
+
+
+def test_quotation_source_lines_join_their_paragraph() -> None:
+    book = parse_epub(SAMPLE_BOOK)
+    chapter_one = next(chapter for chapter in book.chapters if chapter.number == 1)
+
+    assert chapter_one.passages[1].text.endswith("Psalm 145:15, 16 .")
+    assert not any(
+        passage.text.startswith("Psalm 145")
+        for chapter in book.chapters
+        for passage in chapter.passages
+    )

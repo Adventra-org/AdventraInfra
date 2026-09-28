@@ -10,7 +10,7 @@ from psycopg import Connection
 from .embeddings import EMBEDDING_DIMENSIONS
 from .models import BookDocument, RagChunk
 
-IMPORTER_VERSION = "1.0.0"
+IMPORTER_VERSION = "1.1.0"
 
 
 def connect_from_environment() -> Connection:
@@ -53,8 +53,14 @@ def is_imported(
           AND language = %s
           AND source_sha256 = %s
           AND is_active
+          AND EXISTS (
+              SELECT 1
+              FROM content_imports
+              WHERE content_imports.import_id = book_editions.import_id
+                AND content_imports.importer_version = %s
+          )
         """,
-        (book.book_id, book.language, book.source_sha256),
+        (book.book_id, book.language, book.source_sha256, IMPORTER_VERSION),
     ).fetchone()
     return row is not None
 
@@ -195,16 +201,21 @@ def store_book(
                         INSERT INTO passages (
                             passage_id, edition_id, chapter_id, book_id,
                             language, chapter_number, paragraph_number,
-                            sequence, text, content_hash, is_active
+                            sequence, text, content_hash, page_start,
+                            page_end, page_paragraph, is_active
                         )
                         VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, TRUE
                         )
                         ON CONFLICT (passage_id) DO UPDATE SET
                             edition_id = EXCLUDED.edition_id,
                             chapter_id = EXCLUDED.chapter_id,
                             text = EXCLUDED.text,
                             content_hash = EXCLUDED.content_hash,
+                            page_start = EXCLUDED.page_start,
+                            page_end = EXCLUDED.page_end,
+                            page_paragraph = EXCLUDED.page_paragraph,
                             is_active = TRUE,
                             updated_at = NOW()
                         """,
@@ -220,6 +231,9 @@ def store_book(
                                 passage.sequence,
                                 passage.text,
                                 passage.content_hash,
+                                passage.page_start,
+                                passage.page_end,
+                                passage.page_paragraph,
                             )
                             for passage in chapter.passages
                         ],

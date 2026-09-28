@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
@@ -10,6 +12,9 @@ class Passage:
     sequence: int
     text: str
     content_hash: str
+    page_start: int | None = None
+    page_end: int | None = None
+    page_paragraph: int | None = None
 
 
 @dataclass(frozen=True)

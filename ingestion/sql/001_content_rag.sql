@@ -93,6 +93,13 @@ CREATE INDEX IF NOT EXISTS idx_passages_book_language
     ON passages(book_id, language)
     WHERE is_active;
 
+-- Printed-page location from the EPUB page list. page_paragraph is the
+-- paragraph's position among paragraphs starting on page_start, which gives
+-- the standard citation form "page.paragraph" (e.g. SC 10.2).
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_start INTEGER;
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_end INTEGER;
+ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_paragraph INTEGER;
+
 CREATE INDEX IF NOT EXISTS idx_passages_search_vector
     ON passages USING GIN(search_vector);
 
