@@ -50,6 +50,52 @@ AdventraInfra/
       deploy.sh
 ```
 
+## Authentication session policy
+
+The checked-in Keycloak realm requires hosted authorization-code PKCE (`S256`)
+for `adventra-mobile`, disables password grants and registers
+`org.adventra.adventra.auth://callback`. Access tokens last 900 seconds;
+online session idle and maximum lifetimes are 30 days. Refresh rotation is
+enabled with zero reuse. Keep the `basic` client scope: Keycloak 26.5 uses it
+to emit the subject required by backend identity ownership. Audience and email
+mappers explicitly include their claims in token introspection.
+
+The API service account has `realm-management/manage-users` for durable
+account-deletion cleanup. It is not a realm administrator, but this permission
+can manage users: protect the confidential client secret. Do not distribute
+that secret to the mobile app.
+
+Realm startup import **does not update an already-existing realm**. Review
+and apply these policies deliberately before activating the matching backend
+and Flutter branches; pushing a feature branch is not live configuration.
+The existing SMTP settings are unchanged. Resend activation and working email
+callbacks remain separate prerequisites.
+
+Validation uses Node's built-in test runner:
+
+```bash
+node --test keycloak/tests/session-policy.test.mjs
+KEYCLOAK_TEST_HOME=/path/to/isolated/keycloak-26.5.0 \
+  node keycloak/tests/verify-session-lifecycle.mjs
+```
+
+The runtime validator starts Keycloak on loopback port 55440 (override with
+`KEYCLOAK_TEST_PORT`), imports a uniquely named disposable realm using the
+checked-in policies, and replaces all users, client secrets and SMTP settings
+with synthetic test values. It verifies hosted registration/PKCE, disabled
+password grants, actual lifetimes/claims, refresh replay rejection, logout
+revocation and service-account deletion. It stops its server afterward.
+Use a disposable Keycloak distribution and a compatible JDK; remove its data
+directory after testing. It never connects to the deployed provider.
+
+To additionally verify the actual Rust HTTP routes and deletion worker, supply
+`ADVENTRA_TEST_BINARY` (absolute path to the built backend) and
+`ADVENTRA_TEST_DATABASE_URL` (loopback PostgreSQL with a disposable database name
+starting with `auth_lifecycle`). The validator starts the API on port 55441
+(`ADVENTRA_TEST_PORT` overrides it), runs its migrations, and tests immediate
+access blocking plus eventual real Keycloak cleanup. Do not use a shared or
+production database. Both child processes are stopped on completion.
+
 ## Deployment Model
 
 ### 1) Provision Infrastructure

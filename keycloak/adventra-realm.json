@@ -3,6 +3,13 @@
   "realm": "adventra",
   "displayName": "Adventra Realm (Local Dev)",
   "enabled": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 2592000,
+  "ssoSessionMaxLifespan": 2592000,
+  "ssoSessionIdleTimeoutRememberMe": 2592000,
+  "ssoSessionMaxLifespanRememberMe": 2592000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
   "sslRequired": "none",
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
@@ -55,14 +62,15 @@
     {
       "clientId": "adventra-mobile",
       "name": "Adventra Mobile App",
-      "description": "React Native mobile app (iOS and Android)",
+      "description": "Adventra mobile app (iOS and Android), hosted PKCE authentication",
       "enabled": true,
       "publicClient": true,
       "clientAuthenticatorType": "client-secret",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
+        "org.adventra.adventra.auth://callback",
         "adventra://callback",
         "adventra://oauth/callback",
         "adventra://auth/callback",
@@ -82,6 +90,49 @@
         "http://localhost:8081"
       ],
       "protocol": "openid-connect",
+      "defaultClientScopes": ["basic", "web-origins", "acr", "roles", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "adventra-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "adventra-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "adventra-email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "adventra-email-verified",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "emailVerified",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
       "attributes": {
         "post.logout.redirect.uris": "adventra://logout+org.adventra.app://logout",
         "pkce.code.challenge.method": "S256"
@@ -195,6 +246,14 @@
     }
   ],
   "users": [
+    {
+      "username": "service-account-adventra-api",
+      "enabled": true,
+      "serviceAccountClientId": "adventra-api",
+      "clientRoles": {
+        "realm-management": ["manage-users"]
+      }
+    },
     {
       "username": "admin",
       "enabled": true,
