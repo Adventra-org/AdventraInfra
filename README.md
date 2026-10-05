@@ -197,6 +197,15 @@ python -m ingestion.adventra_ingest.cli \
   --dry-run
 ```
 
+## Collect Church Directory Data Locally
+
+The [Adventist Directory crawler](ingestion/directory_crawler/README.md)
+collects congregations from the North American Division by default, with
+resumable SQLite checkpoints and JSON/CSV exports. Additional division, union,
+or conference scopes can be collected sequentially. It respects the site's
+crawl delay, leaves missing coordinates null, and does not import into the
+app database or deploy any resources.
+
 ## Required GitHub Secrets
 
 For workflows in this folder:
