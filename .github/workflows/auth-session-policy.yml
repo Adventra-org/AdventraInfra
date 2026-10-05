@@ -1,0 +1,36 @@
+name: Authentication session policy
+
+on:
+  push:
+    branches: [feature/auth-session-lifecycle]
+    paths: ['keycloak/**', '.github/workflows/auth-session-policy.yml']
+  pull_request:
+    paths: ['keycloak/**', '.github/workflows/auth-session-policy.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keycloak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: node --test keycloak/tests/session-policy.test.mjs
+      - name: Install isolated Keycloak test runtime
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/keycloak/keycloak/releases/download/26.5.0/keycloak-26.5.0.tar.gz \
+            -o "$RUNNER_TEMP/keycloak.tar.gz"
+          tar -xzf "$RUNNER_TEMP/keycloak.tar.gz" -C "$RUNNER_TEMP"
+      - name: Verify actual hosted authentication and revocation
+        env:
+          KEYCLOAK_TEST_HOME: ${{ runner.temp }}/keycloak-26.5.0
+        run: node keycloak/tests/verify-session-lifecycle.mjs
