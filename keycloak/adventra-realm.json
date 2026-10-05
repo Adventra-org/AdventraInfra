@@ -16,7 +16,7 @@
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
   "editUsernameAllowed": true,
-  "verifyEmail": false,
+  "verifyEmail": true,
   "rememberMe": true,
   "smtpServer": {
     "host": "smtp.sendgrid.net",

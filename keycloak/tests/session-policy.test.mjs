@@ -25,6 +25,12 @@ test('mobile authentication is public PKCE, without password grants', () => {
   assert.ok(mobile.redirectUris.includes('org.adventra.adventra.auth://callback'));
 });
 
+test('hosted registration requires email verification and supports recovery', () => {
+  assert.equal(realm.registrationAllowed, true);
+  assert.equal(realm.verifyEmail, true);
+  assert.equal(realm.resetPasswordAllowed, true);
+});
+
 test('introspection includes API audience and authoritative email claims', () => {
   const audience = mobile.protocolMappers.find(mapper => mapper.protocolMapper === 'oidc-audience-mapper');
   assert.equal(audience.config['included.client.audience'], 'adventra-api');
