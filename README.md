@@ -137,6 +137,10 @@ Behavior:
 - Builds and pushes Keycloak image to ACR
 - Creates or updates the `adventra-keycloak` Container App
 - Verifies the deployed Keycloak realm discovery endpoint
+- Reuses the existing confidential API-client secret instead of rotating it on
+  every workflow run
+- Synchronizes the live `adventra-api` client secret and
+  `adventra-api-audience` mapper after Keycloak becomes healthy
 
 Keep `lockdownPostgres=false` while the Rust backend uses its password-based
 `DATABASE_URL`. Entra-only PostgreSQL requires adding renewable managed
@@ -152,9 +156,12 @@ The backend workflow:
 - runs the Rust test suite,
 - builds and pushes `adventra-rust-backend` to the shared ACR,
 - creates or updates the `adventra-api` Container App,
-- references its database URL and JWT secret from Key Vault,
+- references its database URL, legacy JWT secret and Keycloak API-client
+  secret from Key Vault,
+- configures the Keycloak issuer, mobile client and required API audience,
 - keeps at least one replica running, and
-- verifies `GET /health` on the deployed revision.
+- verifies health, public authentication configuration and confidential-client
+  introspection on the deployed revision.
 
 ### 4) Ingest Books
 
