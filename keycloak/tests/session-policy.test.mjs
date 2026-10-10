@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const realm = JSON.parse(readFileSync(new URL('../adventra-realm.json', import.meta.url)));
 const mobile = realm.clients.find(client => client.clientId === 'adventra-mobile');
+const api = realm.clients.find(client => client.clientId === 'adventra-api');
 
 test('access and renewable sessions use the required bounded lifetimes', () => {
   assert.equal(realm.accessTokenLifespan, 900);
@@ -25,7 +26,18 @@ test('mobile authentication is public PKCE, without password grants', () => {
   assert.ok(mobile.redirectUris.includes('org.adventra.adventra.auth://callback'));
 });
 
-test('hosted registration requires email verification and supports recovery', () => {
+test('native auth uses the confidential API client and brute-force protection', () => {
+  assert.equal(realm.bruteForceProtected, true);
+  assert.equal(api.publicClient, false);
+  assert.equal(api.directAccessGrantsEnabled, true);
+  assert.ok(api.secret);
+  const audience = api.protocolMappers.find(
+    mapper => mapper.protocolMapper === 'oidc-audience-mapper',
+  );
+  assert.equal(audience.config['included.client.audience'], 'adventra-api');
+});
+
+test('registration requires email verification and supports recovery', () => {
   assert.equal(realm.registrationAllowed, true);
   assert.equal(realm.verifyEmail, true);
   assert.equal(realm.resetPasswordAllowed, true);
