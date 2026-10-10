@@ -26,6 +26,31 @@ await request(`/admin/realms/${realm}/clients/${apiClient.id}`, {
 });
 
 const mobileClient = await uniqueClient('adventra-mobile', headers);
+const mobileRepresentation = await jsonRequest(
+  `/admin/realms/${realm}/clients/${mobileClient.id}`,
+  {headers},
+);
+mobileRepresentation.publicClient = true;
+mobileRepresentation.standardFlowEnabled = true;
+mobileRepresentation.implicitFlowEnabled = false;
+mobileRepresentation.directAccessGrantsEnabled = false;
+mobileRepresentation.redirectUris = [
+  ...new Set([
+    ...(mobileRepresentation.redirectUris ?? []),
+    'org.adventra.adventra.auth://callback',
+  ]),
+];
+mobileRepresentation.attributes = {
+  ...(mobileRepresentation.attributes ?? {}),
+  'pkce.code.challenge.method': 'S256',
+};
+await request(`/admin/realms/${realm}/clients/${mobileClient.id}`, {
+  method: 'PUT',
+  headers: {...headers, 'content-type': 'application/json'},
+  body: JSON.stringify(mobileRepresentation),
+  expectedStatus: 204,
+});
+
 const mapperPath = `/admin/realms/${realm}/clients/${mobileClient.id}/protocol-mappers/models`;
 const mappers = await jsonRequest(mapperPath, {headers});
 const existingMapper = mappers.find(mapper => mapper.name === 'adventra-api-audience');
@@ -64,7 +89,7 @@ await token(realm, {
   client_secret: apiClientSecret,
 });
 
-console.log('Keycloak API client secret and mobile audience mapper are synchronized.');
+console.log('Keycloak API secret, mobile PKCE client and audience mapper are synchronized.');
 
 function required(name) {
   const value = process.env[name];
