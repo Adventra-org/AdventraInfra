@@ -12,18 +12,47 @@ const adminToken = await token('master', {
 });
 
 const headers = {authorization: `Bearer ${adminToken}`};
+const realmRepresentation = await jsonRequest(`/admin/realms/${realm}`, {headers});
+realmRepresentation.bruteForceProtected = true;
+await request(`/admin/realms/${realm}`, {
+  method: 'PUT',
+  headers: {...headers, 'content-type': 'application/json'},
+  body: JSON.stringify(realmRepresentation),
+  expectedStatus: 204,
+});
+
 const apiClient = await uniqueClient('adventra-api', headers);
 const apiRepresentation = await jsonRequest(
   `/admin/realms/${realm}/clients/${apiClient.id}`,
   {headers},
 );
 apiRepresentation.secret = apiClientSecret;
+apiRepresentation.directAccessGrantsEnabled = true;
 await request(`/admin/realms/${realm}/clients/${apiClient.id}`, {
   method: 'PUT',
   headers: {...headers, 'content-type': 'application/json'},
   body: JSON.stringify(apiRepresentation),
   expectedStatus: 204,
 });
+
+const serviceAccount = await jsonRequest(
+  `/admin/realms/${realm}/clients/${apiClient.id}/service-account-user`,
+  {headers},
+);
+const realmManagementClient = await uniqueClient('realm-management', headers);
+const manageUsersRole = await jsonRequest(
+  `/admin/realms/${realm}/clients/${realmManagementClient.id}/roles/manage-users`,
+  {headers},
+);
+await request(
+  `/admin/realms/${realm}/users/${serviceAccount.id}/role-mappings/clients/${realmManagementClient.id}`,
+  {
+    method: 'POST',
+    headers: {...headers, 'content-type': 'application/json'},
+    body: JSON.stringify([manageUsersRole]),
+    expectedStatus: 204,
+  },
+);
 
 const mobileClient = await uniqueClient('adventra-mobile', headers);
 const mobileRepresentation = await jsonRequest(
@@ -51,9 +80,6 @@ await request(`/admin/realms/${realm}/clients/${mobileClient.id}`, {
   expectedStatus: 204,
 });
 
-const mapperPath = `/admin/realms/${realm}/clients/${mobileClient.id}/protocol-mappers/models`;
-const mappers = await jsonRequest(mapperPath, {headers});
-const existingMapper = mappers.find(mapper => mapper.name === 'adventra-api-audience');
 const audienceMapper = {
   name: 'adventra-api-audience',
   protocol: 'openid-connect',
@@ -67,20 +93,25 @@ const audienceMapper = {
   },
 };
 
-if (existingMapper) {
-  await request(`${mapperPath}/${existingMapper.id}`, {
-    method: 'PUT',
-    headers: {...headers, 'content-type': 'application/json'},
-    body: JSON.stringify({...audienceMapper, id: existingMapper.id}),
-    expectedStatus: 204,
-  });
-} else {
-  await request(mapperPath, {
-    method: 'POST',
-    headers: {...headers, 'content-type': 'application/json'},
-    body: JSON.stringify(audienceMapper),
-    expectedStatus: 201,
-  });
+for (const client of [apiClient, mobileClient]) {
+  const mapperPath = `/admin/realms/${realm}/clients/${client.id}/protocol-mappers/models`;
+  const mappers = await jsonRequest(mapperPath, {headers});
+  const existingMapper = mappers.find(mapper => mapper.name === audienceMapper.name);
+  if (existingMapper) {
+    await request(`${mapperPath}/${existingMapper.id}`, {
+      method: 'PUT',
+      headers: {...headers, 'content-type': 'application/json'},
+      body: JSON.stringify({...audienceMapper, id: existingMapper.id}),
+      expectedStatus: 204,
+    });
+  } else {
+    await request(mapperPath, {
+      method: 'POST',
+      headers: {...headers, 'content-type': 'application/json'},
+      body: JSON.stringify(audienceMapper),
+      expectedStatus: 201,
+    });
+  }
 }
 
 await token(realm, {
@@ -89,7 +120,7 @@ await token(realm, {
   client_secret: apiClientSecret,
 });
 
-console.log('Keycloak API secret, mobile PKCE client and audience mapper are synchronized.');
+console.log('Keycloak native auth, API credentials, role mappings and audience are synchronized.');
 
 function required(name) {
   const value = process.env[name];

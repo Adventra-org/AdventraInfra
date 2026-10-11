@@ -82,9 +82,10 @@ KEYCLOAK_TEST_HOME=/path/to/isolated/keycloak-26.5.0 \
 The runtime validator starts Keycloak on loopback port 55440 (override with
 `KEYCLOAK_TEST_PORT`), imports a uniquely named disposable realm using the
 checked-in policies, and replaces all users, client secrets and SMTP settings
-with synthetic test values. It verifies hosted registration/PKCE, disabled
-password grants, actual lifetimes/claims, refresh replay rejection, logout
-revocation and service-account deletion. It stops its server afterward.
+with synthetic test values. It verifies the retained public-client PKCE policy,
+confidential API-client grants, actual lifetimes/claims, refresh replay
+rejection, logout revocation and service-account deletion. It stops its server
+afterward.
 Use a disposable Keycloak distribution and a compatible JDK; remove its data
 directory after testing. It never connects to the deployed provider.
 
