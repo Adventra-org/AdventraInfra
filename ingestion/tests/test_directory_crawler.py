@@ -4,11 +4,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from ingestion.directory_crawler.cli import Browser, collect, exclusive_run, retry_delay
-from ingestion.directory_crawler.parser import (
+from directory_crawler.cli import Browser, collect, exclusive_run, retry_delay
+from directory_crawler.parser import (
     DirectoryError, parse_detail, parse_search, search_url, source_url, validate_destination,
 )
-from ingestion.directory_crawler.store import Store
+from directory_crawler.store import Store
 
 
 def listing_html(entity="123", total=1, start=1, next_link=""):
@@ -199,8 +199,8 @@ class StoreTests(unittest.TestCase):
     def test_delay_persists_across_restarts(self):
         self.store.set_last_request(100)
         browser = Browser(Mock(), self.store, 20, 120)
-        with patch("ingestion.directory_crawler.cli.time.time", return_value=105), patch(
-            "ingestion.directory_crawler.cli.time.sleep"
+        with patch("directory_crawler.cli.time.time", return_value=105), patch(
+            "directory_crawler.cli.time.sleep"
         ) as sleep:
             browser.wait()
         sleep.assert_called_once_with(15)
@@ -242,7 +242,7 @@ class StoreTests(unittest.TestCase):
         browser.robots = Mock()
         browser.robots.can_fetch.return_value = True
         with patch.object(browser, "wait"), patch(
-            "ingestion.directory_crawler.cli.time.time", return_value=100
+            "directory_crawler.cli.time.time", return_value=100
         ):
             with self.assertRaises(DirectoryError):
                 browser.fetch(self.page.records[0]["source_url"])
