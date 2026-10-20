@@ -217,6 +217,24 @@ The backend workflow:
 - verifies health, public authentication configuration and confidential-client
   introspection on the deployed revision.
 
+### Development database recovery
+
+The manual-only [backend database recovery workflow](.github/workflows/backend-database-recovery.yml)
+defaults to `inspect`: it reads the backend's existing connection secret and
+reports schema/constraint/migration metadata without reading application rows.
+It refuses any connection outside the fixed development PostgreSQL host and
+`adventra` database.
+
+`rebuild` is destructive and requires explicit approval plus the exact
+confirmation `RESET adventra`. It deactivates all backend revisions, drops and
+recreates only `adventra`, and leaves the API offline until a verified backend
+image is deployed to apply its embedded migrations. Keycloak's separate
+`keycloak` database, the `egw` database, server configuration, secrets and roles
+are unchanged. This removes imported content as well as application records;
+external data must be re-ingested separately after schema compatibility is
+verified. Existing Keycloak identities remain, but their application records
+and application-only eligibility are lost.
+
 ### 4) Ingest Books
 
 Add EPUB files under `books/<collection>/`. The

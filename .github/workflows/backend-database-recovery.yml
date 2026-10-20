@@ -1,0 +1,140 @@
+name: Inspect or rebuild development backend database
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect schema metadata, or permanently rebuild the application database
+        type: choice
+        options:
+          - inspect
+          - rebuild
+        default: inspect
+      confirmation:
+        description: Rebuild requires RESET adventra (all application data will be lost)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: development-backend-database-recovery
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      RESOURCE_GROUP: adventra-dev
+      APP_NAME: adventra-api
+      EXPECTED_HOST: ar-dev-pg-qlon27cr5h6tu.postgres.database.azure.com
+      EXPECTED_DATABASE: adventra
+      RECOVERY_MODE: ${{ inputs.mode }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Azure login (existing deployment identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Resolve and validate existing application connection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(az account show --query id -o tsv)" = "9ab32d5c-5f7a-413a-b251-8598b4546692"
+          command -v psql
+          SECRET_NAME=$(az containerapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+            --query "properties.template.containers[0].env[?name=='DATABASE_URL'].secretRef | [0]" -o tsv)
+          test -n "$SECRET_NAME"
+          REF=$(az containerapp secret list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+            --query "[?name=='$SECRET_NAME'].keyVaultUrl | [0]" -o tsv)
+          test -n "$REF"
+          DATABASE_URL=$(az keyvault secret show --id "$REF" --query value -o tsv)
+          echo "::add-mask::$DATABASE_URL"
+          export DATABASE_URL
+          python3 - <<'PY'
+          import os
+          from urllib.parse import unquote, urlsplit
+
+          url = urlsplit(os.environ["DATABASE_URL"])
+          database = unquote(url.path.removeprefix("/"))
+          if url.scheme not in ("postgres", "postgresql") or url.hostname != os.environ["EXPECTED_HOST"]:
+              raise SystemExit("Unexpected application database host or URL scheme; refusing recovery.")
+          print(f"Application target: {url.hostname}/{database}")
+          if database != os.environ["EXPECTED_DATABASE"]:
+              raise SystemExit("Unexpected application database name; refusing recovery.")
+          values = {
+              "PGHOST": url.hostname,
+              "PGPORT": str(url.port or 5432),
+              "PGDATABASE": database,
+              "PGUSER": unquote(url.username or ""),
+              "PGPASSWORD": unquote(url.password or ""),
+              "PGSSLMODE": "require",
+              "PGCONNECT_TIMEOUT": "15",
+          }
+          if not values["PGUSER"] or not values["PGPASSWORD"]:
+              raise SystemExit("Expected existing password-authenticated connection.")
+          print(f"::add-mask::{values['PGPASSWORD']}")
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              for key, value in values.items():
+                  if "\n" in value or "\r" in value:
+                      raise SystemExit("Unexpected newline in connection field.")
+                  output.write(f"{key}={value}\n")
+          PY
+      - name: Inspect schema and migration metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT current_database(), current_user,
+                 pg_get_userbyid(datdba) AS owner,
+                 pg_encoding_to_char(encoding) AS encoding, datcollate, datctype
+          FROM pg_database WHERE datname = current_database();
+          SELECT extname, extversion FROM pg_extension ORDER BY extname;
+          SELECT table_schema, table_name FROM information_schema.tables
+          WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY 1, 2;
+          SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+          WHERE conrelid = to_regclass('public.book_editions') ORDER BY conname;
+          SELECT indexname, indexdef FROM pg_indexes
+          WHERE schemaname = 'public' AND tablename = 'book_editions' ORDER BY indexname;
+          SELECT to_regclass('public._sqlx_migrations') IS NOT NULL AS has_migrations \gset
+          \if :has_migrations
+          SELECT version, description, success FROM public._sqlx_migrations ORDER BY version;
+          \endif
+          SQL
+      - name: Rebuild only the explicitly confirmed development application database
+        if: ${{ inputs.mode == 'rebuild' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RECOVERY_MODE" = "rebuild"
+          test "$CONFIRMATION" = "RESET adventra"
+          test "$PGDATABASE" = "adventra"
+          OWNER=$(psql -X -At -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")
+          test "$OWNER" = "$PGUSER"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_encoding_to_char(encoding) = 'UTF8' AND datcollate = 'en_US.utf8' AND datctype = 'en_US.utf8' FROM pg_database WHERE datname = current_database()")" = "t"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c \
+            "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user")" = "t"
+          # No old application revision may recreate its legacy schema during recovery.
+          mapfile -t REVISIONS < <(az containerapp revision list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+            --query '[?properties.active].name' -o tsv)
+          for REVISION in "${REVISIONS[@]}"; do
+            az containerapp revision deactivate -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+              --revision "$REVISION" --output none
+          done
+          test "$(az containerapp revision list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+            --query 'length([?properties.active])' -o tsv)" = "0"
+          PGDATABASE=postgres psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DROP DATABASE adventra WITH (FORCE);
+          SELECT format('CREATE DATABASE adventra OWNER %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L',
+                        current_user, 'UTF8', 'en_US.utf8', 'en_US.utf8') \gexec
+          SQL
+          psql -X -v ON_ERROR_STOP=1 -c \
+            "SELECT current_database(), count(*) AS application_tables FROM information_schema.tables WHERE table_schema = 'public'"
+          echo "The adventra database is empty. Deploy the verified backend image to run all embedded migrations."
