@@ -12,6 +12,41 @@ const adminToken = await token('master', {
 });
 
 const headers = {authorization: `Bearer ${adminToken}`};
+const profilePath = `/admin/realms/${realm}/users/profile`;
+const profile = await jsonRequest(profilePath, {headers});
+const birthdateAttribute = {
+  name: 'birthdate',
+  displayName: 'Date of birth',
+  multivalued: false,
+  permissions: {view: ['admin'], edit: ['admin']},
+  validations: {
+    pattern: {pattern: '^\\d{4}-\\d{2}-\\d{2}$'},
+  },
+};
+profile.attributes = [
+  ...profile.attributes.filter(attribute => attribute.name !== 'birthdate'),
+  birthdateAttribute,
+];
+await request(profilePath, {
+  method: 'PUT',
+  headers: {...headers, 'content-type': 'application/json'},
+  body: JSON.stringify(profile),
+  expectedStatus: 200,
+});
+
+// Keycloak's built-in profile scope maps birthdate into tokens independently
+// of managed-profile visibility permissions.
+const clientScopes = await jsonRequest(`/admin/realms/${realm}/client-scopes`, {headers});
+for (const scope of clientScopes) {
+  for (const mapper of scope.protocolMappers ?? []) {
+    if (mapsBirthdate(mapper)) {
+      await request(`/admin/realms/${realm}/client-scopes/${scope.id}/protocol-mappers/models/${mapper.id}`, {
+        method: 'DELETE', headers, expectedStatus: 204,
+      });
+    }
+  }
+}
+
 const realmRepresentation = await jsonRequest(`/admin/realms/${realm}`, {headers});
 realmRepresentation.bruteForceProtected = true;
 await request(`/admin/realms/${realm}`, {
@@ -96,6 +131,13 @@ const audienceMapper = {
 for (const client of [apiClient, mobileClient]) {
   const mapperPath = `/admin/realms/${realm}/clients/${client.id}/protocol-mappers/models`;
   const mappers = await jsonRequest(mapperPath, {headers});
+  for (const mapper of mappers) {
+    if (mapsBirthdate(mapper)) {
+      await request(`${mapperPath}/${mapper.id}`, {
+        method: 'DELETE', headers, expectedStatus: 204,
+      });
+    }
+  }
   const existingMapper = mappers.find(mapper => mapper.name === audienceMapper.name);
   if (existingMapper) {
     await request(`${mapperPath}/${existingMapper.id}`, {
@@ -126,6 +168,12 @@ function required(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} must be set`);
   return value;
+}
+
+function mapsBirthdate(mapper) {
+  return ['birthdate', 'birth_date'].some(name =>
+    mapper.config?.['user.attribute'] === name || mapper.config?.['claim.name'] === name,
+  );
 }
 
 async function uniqueClient(clientId, headers) {

@@ -71,15 +71,68 @@ and Flutter branches; pushing a feature branch is not live configuration.
 The existing SMTP settings are unchanged. Resend activation and working email
 callbacks remain separate prerequisites.
 
+### Private birth-date attribute
+
+Run `keycloak/sync-realm.mjs` with `KEYCLOAK_ORIGIN`,
+`KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD`, and `KEYCLOAK_API_CLIENT_SECRET`
+(optionally `KEYCLOAK_REALM` and `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME`) before
+deploying the backend birth-date-retention change. The sync preserves other
+managed-profile settings and declares `birthdate` as a single `YYYY-MM-DD`
+attribute visible/editable only to admins. Backend validation enforces calendar
+validity and age limits. The sync also removes birth-date claim/attribute mappers
+from realm client scopes and the API/mobile clients: Keycloak's built-in
+`profile` scope otherwise emits `birthdate` despite admin-only profile visibility.
+Do not add it to public profiles or token mappers. Previously issued tokens are
+not rewritten; enable retention only after this sync and deploy the backend
+afterward.
+Startup realm import alone does not apply this managed-profile configuration,
+even for a new realm; run the sync after import.
+
+The backend reads back persisted birth dates and reports an error if the realm
+filters them out. Missing historical dates must be recollected, never inferred
+from an eligibility date. User deletion removes the retained attribute with the
+identity. Synchronization does not backfill dates or change existing users.
+
+For the existing Azure deployment, dispatch **Configure Infra** on `dev` with
+`birthdateMode=configure` to apply only the managed-profile/mapper policy using
+the established deployment identity. This skips PostgreSQL configuration and
+Keycloak image/revision changes. A seven-day, configuration-only rollback
+snapshot is retained as a workflow artifact. After the backend deployment,
+dispatch with `birthdateMode=verify` to test a uniquely named synthetic account,
+then delete its Keycloak identity and schedule its application-data cleanup
+under the existing deletion policy. These modes do not create resources,
+change RBAC, or rotate secrets. The default `none` preserves the full workflow.
+
 Validation uses Node's built-in test runner:
 
 ```bash
 node --test keycloak/tests/session-policy.test.mjs
+node --test keycloak/tests/birthdate-profile.test.mjs
 KEYCLOAK_TEST_HOME=/path/to/isolated/keycloak-26.5.0 \
   node keycloak/tests/verify-session-lifecycle.mjs
 ```
 
-The runtime validator starts Keycloak on loopback port 55440 (override with
+For a real-provider birth-date check, start an **isolated** Keycloak 26.5 instance
+on loopback port 55440 with disposable administrator credentials and an empty
+PostgreSQL database named `birthdate_test...`. Then run:
+
+```bash
+KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=disposable-admin \
+KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=... \
+ADVENTRA_TEST_DATABASE_URL=postgresql://.../birthdate_test \
+ADVENTRA_TEST_BINARY=/absolute/path/to/egw_rust_backend \
+  node keycloak/tests/verify-birthdate-retention.mjs
+```
+
+This validator creates and removes a uniquely named realm, runs the actual
+profile sync and backend HTTP routes, and checks exact retention, under-13
+eligibility, idempotent retries, existing-account collection, token/userinfo
+privacy, preserved account fields and identity deletion. It stops its backend;
+stop/remove the disposable Keycloak and PostgreSQL instances afterward. It does
+not contact the deployed provider. `KEYCLOAK_TEST_ORIGIN` and
+`ADVENTRA_TEST_PORT` override the loopback provider origin and backend port.
+
+The separate `verify-session-lifecycle.mjs` validator starts Keycloak on loopback port 55440 (override with
 `KEYCLOAK_TEST_PORT`), imports a uniquely named disposable realm using the
 checked-in policies, and replaces all users, client secrets and SMTP settings
 with synthetic test values. It verifies the retained public-client PKCE policy,

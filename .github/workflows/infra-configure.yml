@@ -10,6 +10,15 @@ on:
       - '.github/workflows/infra-configure.yml'
   workflow_dispatch:
     inputs:
+      birthdateMode:
+        description: Only configure birthdate privacy or verify the deployed backend (no infrastructure changes)
+        required: false
+        type: choice
+        options:
+          - none
+          - configure
+          - verify
+        default: none
       lockdownPostgres:
         description: Lock down PostgreSQL after configuration (disable password auth)
         required: false
@@ -36,6 +45,7 @@ permissions:
 jobs:
   configure-pgsql:
     name: Configure PostgreSQL with Managed Identity
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.birthdateMode || inputs.birthdateMode == 'none' }}
     runs-on: ubuntu-latest
     environment: development
     outputs:
@@ -837,3 +847,57 @@ jobs:
           export KEYCLOAK_API_CLIENT_SECRET
           node keycloak/sync-realm.mjs
           unset KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD KEYCLOAK_API_CLIENT_SECRET
+
+  birthdate-only:
+    name: Keycloak birthdate configuration or verification only
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.birthdateMode == 'configure' || inputs.birthdateMode == 'verify') }}
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate profile policy
+        run: node --test keycloak/tests/session-policy.test.mjs keycloak/tests/birthdate-profile.test.mjs
+      - name: Azure login (existing deployment identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Load existing Keycloak credentials without changing roles or secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF=$(az containerapp secret list -g "$resourceGroupName" -n adventra-keycloak \
+            --query "[?name=='bootstrap-admin-password'].keyVaultUrl | [0]" -o tsv)
+          API_REF=$(az containerapp secret list -g "$resourceGroupName" -n adventra-api \
+            --query "[?name=='keycloak-api-client-secret'].keyVaultUrl | [0]" -o tsv)
+          ADMIN=$(az keyvault secret show --id "$REF" --query value -o tsv)
+          SECRET=$(az keyvault secret show --id "$API_REF" --query value -o tsv)
+          echo "::add-mask::$ADMIN"
+          echo "::add-mask::$SECRET"
+          KC_HOST=$(az containerapp show -g "$resourceGroupName" -n adventra-keycloak \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          API_HOST=$(az containerapp show -g "$resourceGroupName" -n adventra-api \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          {
+            echo "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=$ADMIN"
+            echo "KEYCLOAK_API_CLIENT_SECRET=$SECRET"
+            echo "KEYCLOAK_ORIGIN=https://$KC_HOST"
+            echo "ADVENTRA_API_ORIGIN=https://$API_HOST"
+            echo "KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=adventra-admin"
+          } >> "$GITHUB_ENV"
+      - name: Apply or verify private birthdate retention
+        env:
+          BIRTHDATE_MODE: ${{ inputs.birthdateMode }}
+        run: node keycloak/verify-deployed-birthdate.mjs
+      - name: Retain configuration-only rollback snapshot
+        if: ${{ always() && inputs.birthdateMode == 'configure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: birthdate-profile-rollback
+          path: birthdate-profile-rollback.json
+          retention-days: 7
+          if-no-files-found: warn
