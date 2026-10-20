@@ -77,7 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     with connect_from_environment() as connection:
         apply_schema(connection, args.schema)
         for book, chunks in zip(books, chunk_sets, strict=True):
-            if is_imported(connection, book, force=args.force):
+            if is_imported(
+                connection, book, embedding_model=embedder.model_name, force=args.force
+            ):
                 print(
                     f"Skipping unchanged book {book.book_id} "
                     f"({book.content_version})"
@@ -119,4 +121,3 @@ def _expand_paths(patterns: list[str]) -> list[Path]:
 
 if __name__ == "__main__":
     sys.exit(main())
-

@@ -248,7 +248,8 @@ The workflow:
 
 - validates the EPUB and runs parser/chunking tests,
 - enables the PostgreSQL `vector` extension,
-- creates the versioned content/RAG schema,
+- requires all Backend migrations and validates the canonical reader schema,
+- creates only ingestion-owned metadata/index tables in `content_ingestion`,
 - extracts metadata, chapters, and paragraph-level passages,
 - creates stable passage IDs and overlapping 400-800 token RAG chunks,
 - generates 1,536-dimension embeddings with Azure OpenAI
@@ -266,6 +267,59 @@ the infrastructure prerequisite has not been applied.
 The workflow uses Azure OIDC credentials and discovers PostgreSQL and Azure
 OpenAI from the target resource group. No database password or Azure OpenAI key
 is stored in the repository.
+
+#### Shared content storage contract
+
+AdventraBackend migrations exclusively own `public.books`,
+`public.book_editions` and `public.passages`. An edition is the canonical
+`(book_id, language)` reader record. Ingestion updates these rows transactionally,
+preserves stable passage IDs and printed-page citations, and marks removed
+passages inactive rather than deleting records referenced by user features.
+Re-imports update paragraph order as well as text and locations.
+
+Import attempts, source/publisher metadata, revision history, chapter metadata
+and pgvector chunks live in `content_ingestion.imports`, `editions`, `chapters`
+and `rag_chunks`. Revision metadata is retained; chapter metadata and chunks
+represent the current corpus, not an archival copy of previous source text.
+Replacing a revision and its reader/index rows is one transaction; a failure
+rolls back the replacement and records a failed import separately.
+
+The CLI refuses a database without Backend migrations or with the old
+`public.book_editions.edition_id` layout. `CREATE TABLE IF NOT EXISTS` is not a
+schema-conversion strategy: legacy installations require a separately reviewed
+data migration; this importer never resets databases or converts reader tables.
+Apply Backend migrations first. Do not edit previously applied SQLx migrations.
+
+The workflow resolves the backend's existing Key Vault `DATABASE_URL` reference
+using its existing authorized deployment identity. It writes as the reader-table
+owner so canonical tables created by the backend do not need grants to a second
+schema owner. It verifies the host/database against the selected environment.
+This requires existing Key Vault secret-read access; failures are explicit and
+the workflow does not grant itself roles or change database passwords.
+
+Unchanged-import detection includes importer version, source hash, embedding
+model and a hash of the actual canonical reader corpus. Source changes invalidate
+the Backend registry's content hash, so previous source approval does not make a
+changed revision eligible automatically. This pipeline does not grant approval
+or replace the separate approval-controlled Backend ingestion jobs.
+
+Real database contract tests run in the Backend study workflow against that
+checkout's actual migrations and the Infra `dev` importer. For local validation,
+use a disposable PostgreSQL instance with pgvector installed and a role allowed
+to create databases:
+
+```bash
+export INGESTION_TEST_DATABASE_URL='postgresql://test-user:test-password@localhost:5432/postgres'
+export BACKEND_MIGRATIONS_PATH='/absolute/path/to/AdventraBackend/migrations'
+cd ingestion
+python -m pytest -q tests/test_database.py tests/test_database_integration.py
+```
+
+Tests create/drop only uniquely named `ingestion_contract_*` databases, apply
+the real Backend migrations, and exercise schema checks, imports, repeated and
+updated sources, language isolation, rollback and approval-hash invalidation.
+Without `INGESTION_TEST_DATABASE_URL`, integration tests explicitly skip; a
+configured but unusable database fails rather than silently skipping.
 
 To validate books locally without Azure or PostgreSQL:
 

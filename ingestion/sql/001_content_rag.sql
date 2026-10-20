@@ -1,13 +1,37 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Reader tables belong exclusively to AdventraBackend migrations.
+DO $$
+BEGIN
+    IF to_regclass('public.books') IS NULL
+        OR to_regclass('public.book_editions') IS NULL
+        OR to_regclass('public.passages') IS NULL
+        OR to_regprocedure('public.content_source_sha256(text,text)') IS NULL THEN
+        RAISE EXCEPTION 'Apply all AdventraBackend migrations before running ingestion';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'book_editions'
+            AND column_name = 'edition_id'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'public.book_editions'::regclass AND contype = 'p'
+            AND pg_get_constraintdef(oid) = 'PRIMARY KEY (book_id, language)'
+    ) THEN
+        RAISE EXCEPTION 'Incompatible legacy ingestion schema: reconcile with Backend migrations before importing; no automatic conversion or data deletion is performed';
+    END IF;
+END;
+$$;
 
-CREATE TABLE IF NOT EXISTS content_imports (
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE SCHEMA IF NOT EXISTS content_ingestion;
+
+CREATE TABLE IF NOT EXISTS content_ingestion.imports (
     import_id UUID PRIMARY KEY,
     source_path TEXT NOT NULL,
     source_sha256 TEXT NOT NULL,
     importer_version TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('processing', 'succeeded', 'failed')),
-    book_id TEXT,
-    language TEXT,
+    book_id TEXT NOT NULL,
+    language TEXT NOT NULL,
     chapter_count INTEGER NOT NULL DEFAULT 0,
     passage_count INTEGER NOT NULL DEFAULT 0,
     chunk_count INTEGER NOT NULL DEFAULT 0,
@@ -16,98 +40,49 @@ CREATE TABLE IF NOT EXISTS content_imports (
     completed_at TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_content_imports_source_sha256
-    ON content_imports(source_sha256);
+CREATE INDEX IF NOT EXISTS idx_imports_source_sha256
+    ON content_ingestion.imports(source_sha256);
 
-CREATE TABLE IF NOT EXISTS books (
-    book_id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    author TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS content_ingestion.editions (
+    edition_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL,
+    language TEXT NOT NULL,
     source_identifier TEXT,
     publisher TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS book_editions (
-    edition_id TEXT PRIMARY KEY,
-    book_id TEXT NOT NULL REFERENCES books(book_id) ON DELETE CASCADE,
-    language TEXT NOT NULL,
     source_format TEXT NOT NULL,
     source_path TEXT NOT NULL,
     source_sha256 TEXT NOT NULL,
     content_version TEXT NOT NULL,
-    import_id UUID NOT NULL REFERENCES content_imports(import_id),
+    canonical_sha256 TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
+    import_id UUID NOT NULL REFERENCES content_ingestion.imports(import_id),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (book_id, language, source_sha256)
+    FOREIGN KEY (book_id, language)
+        REFERENCES public.book_editions(book_id, language)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_book_editions_one_active_language
-    ON book_editions(book_id, language)
-    WHERE is_active;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_editions_one_active_language
+    ON content_ingestion.editions(book_id, language) WHERE is_active;
 
-CREATE TABLE IF NOT EXISTS chapters (
+CREATE TABLE IF NOT EXISTS content_ingestion.chapters (
     chapter_id TEXT PRIMARY KEY,
-    edition_id TEXT NOT NULL REFERENCES book_editions(edition_id) ON DELETE CASCADE,
-    book_id TEXT NOT NULL REFERENCES books(book_id) ON DELETE CASCADE,
+    edition_id TEXT NOT NULL REFERENCES content_ingestion.editions(edition_id),
+    book_id TEXT NOT NULL,
     language TEXT NOT NULL,
     chapter_number INTEGER NOT NULL,
     title TEXT NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (book_id, language, chapter_number)
+    UNIQUE (book_id, language, chapter_number),
+    FOREIGN KEY (book_id, language)
+        REFERENCES public.book_editions(book_id, language)
 );
 
-CREATE INDEX IF NOT EXISTS idx_chapters_book_language
-    ON chapters(book_id, language, chapter_number)
-    WHERE is_active;
-
-CREATE TABLE IF NOT EXISTS passages (
-    passage_id TEXT PRIMARY KEY,
-    edition_id TEXT NOT NULL REFERENCES book_editions(edition_id) ON DELETE CASCADE,
-    chapter_id TEXT NOT NULL REFERENCES chapters(chapter_id) ON DELETE CASCADE,
-    book_id TEXT NOT NULL REFERENCES books(book_id) ON DELETE CASCADE,
-    language TEXT NOT NULL,
-    chapter_number INTEGER NOT NULL,
-    paragraph_number INTEGER NOT NULL,
-    sequence INTEGER NOT NULL,
-    passage_type TEXT NOT NULL DEFAULT 'paragraph',
-    text TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    search_vector TSVECTOR GENERATED ALWAYS AS (
-        to_tsvector('simple', COALESCE(text, ''))
-    ) STORED,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (book_id, language, chapter_number, paragraph_number)
-);
-
-CREATE INDEX IF NOT EXISTS idx_passages_chapter_sequence
-    ON passages(chapter_id, sequence)
-    WHERE is_active;
-
-CREATE INDEX IF NOT EXISTS idx_passages_book_language
-    ON passages(book_id, language)
-    WHERE is_active;
-
--- Printed-page location from the EPUB page list. page_paragraph is the
--- paragraph's position among paragraphs starting on page_start, which gives
--- the standard citation form "page.paragraph" (e.g. SC 10.2).
-ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_start INTEGER;
-ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_end INTEGER;
-ALTER TABLE passages ADD COLUMN IF NOT EXISTS page_paragraph INTEGER;
-
-CREATE INDEX IF NOT EXISTS idx_passages_search_vector
-    ON passages USING GIN(search_vector);
-
-CREATE TABLE IF NOT EXISTS rag_chunks (
+CREATE TABLE IF NOT EXISTS content_ingestion.rag_chunks (
     chunk_id TEXT PRIMARY KEY,
-    edition_id TEXT NOT NULL REFERENCES book_editions(edition_id) ON DELETE CASCADE,
-    chapter_id TEXT NOT NULL REFERENCES chapters(chapter_id) ON DELETE CASCADE,
-    book_id TEXT NOT NULL REFERENCES books(book_id) ON DELETE CASCADE,
+    edition_id TEXT NOT NULL REFERENCES content_ingestion.editions(edition_id),
+    chapter_id TEXT NOT NULL REFERENCES content_ingestion.chapters(chapter_id),
+    book_id TEXT NOT NULL,
     language TEXT NOT NULL,
     chunk_number INTEGER NOT NULL,
     passage_ids TEXT[] NOT NULL,
@@ -120,13 +95,13 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
     embedding_dimensions INTEGER NOT NULL CHECK (embedding_dimensions = 1536),
     content_version TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (book_id, language, chapter_id, chunk_number)
+    UNIQUE (book_id, language, chapter_id, chunk_number),
+    FOREIGN KEY (book_id, language)
+        REFERENCES public.book_editions(book_id, language)
 );
 
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_book_language
-    ON rag_chunks(book_id, language);
+    ON content_ingestion.rag_chunks(book_id, language);
 
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_embedding_hnsw
-    ON rag_chunks USING HNSW (embedding vector_cosine_ops);
-
+    ON content_ingestion.rag_chunks USING HNSW (embedding vector_cosine_ops);

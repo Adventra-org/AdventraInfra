@@ -11,6 +11,9 @@ def test_store_book_uses_cursor_for_batch_inserts() -> None:
     connection = MagicMock(spec=Connection)
     cursor = connection.cursor.return_value.__enter__.return_value
     book = _book()
+    cursor.rowcount = len(book.chapters[0].passages)
+    connection.execute.return_value.fetchone.return_value = ("canonical-hash",)
+    connection.execute.return_value.rowcount = 1
     chunk = RagChunk(
         chunk_id="sample:en:chapter-001:c0001",
         chapter_id=book.chapters[0].chapter_id,
