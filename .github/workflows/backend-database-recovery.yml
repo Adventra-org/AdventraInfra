@@ -1,6 +1,14 @@
 name: Inspect or rebuild development backend database
 
 on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: inspect
+      confirmation:
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       mode:

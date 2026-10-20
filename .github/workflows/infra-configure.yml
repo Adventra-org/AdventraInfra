@@ -10,6 +10,20 @@ on:
       - '.github/workflows/infra-configure.yml'
   workflow_dispatch:
     inputs:
+      backendDatabaseMode:
+        description: Inspect or rebuild only the development application database
+        required: false
+        type: choice
+        options:
+          - none
+          - inspect
+          - rebuild
+        default: none
+      backendDatabaseConfirmation:
+        description: Rebuild permanently deletes application data; requires RESET adventra
+        required: false
+        type: string
+        default: ''
       birthdateMode:
         description: Only configure birthdate privacy or verify the deployed backend (no infrastructure changes)
         required: false
@@ -45,7 +59,7 @@ permissions:
 jobs:
   configure-pgsql:
     name: Configure PostgreSQL with Managed Identity
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.birthdateMode || inputs.birthdateMode == 'none' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || ((!inputs.birthdateMode || inputs.birthdateMode == 'none') && (!inputs.backendDatabaseMode || inputs.backendDatabaseMode == 'none')) }}
     runs-on: ubuntu-latest
     environment: development
     outputs:
@@ -901,3 +915,12 @@ jobs:
           path: birthdate-profile-rollback.json
           retention-days: 7
           if-no-files-found: warn
+
+  backend-database-recovery:
+    name: Development application database recovery only
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.backendDatabaseMode == 'inspect' || inputs.backendDatabaseMode == 'rebuild') }}
+    uses: ./.github/workflows/backend-database-recovery.yml
+    with:
+      mode: ${{ inputs.backendDatabaseMode }}
+      confirmation: ${{ inputs.backendDatabaseConfirmation }}
+    secrets: inherit

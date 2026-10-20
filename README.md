@@ -219,14 +219,15 @@ The backend workflow:
 
 ### Development database recovery
 
-The manual-only [backend database recovery workflow](.github/workflows/backend-database-recovery.yml)
-defaults to `inspect`: it reads the backend's existing connection secret and
+Use Configure Infra with `backendDatabaseMode=inspect` to invoke the guarded
+[backend database recovery workflow](.github/workflows/backend-database-recovery.yml).
+Inspection reads the backend's existing connection secret and
 reports schema/constraint/migration metadata without reading application rows.
 It refuses any connection outside the fixed development PostgreSQL host and
 `adventra` database.
 
-`rebuild` is destructive and requires explicit approval plus the exact
-confirmation `RESET adventra`. It deactivates all backend revisions, drops and
+`backendDatabaseMode=rebuild` is destructive and requires explicit approval plus
+`backendDatabaseConfirmation=RESET adventra`. It deactivates all backend revisions, drops and
 recreates only `adventra`, and leaves the API offline until a verified backend
 image is deployed to apply its embedded migrations. Keycloak's separate
 `keycloak` database, the `egw` database, server configuration, secrets and roles
