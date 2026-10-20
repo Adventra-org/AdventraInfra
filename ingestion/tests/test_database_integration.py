@@ -12,6 +12,8 @@ import pytest
 from adventra_ingest.database import apply_schema, is_imported, store_book
 from adventra_ingest.embeddings import EMBEDDING_DIMENSIONS
 from adventra_ingest.models import BookDocument, Chapter, Passage, RagChunk
+from adventra_ingest.chunking import build_chunks
+from adventra_ingest.epub import parse_epub
 
 SCHEMA = Path(__file__).parents[1] / "sql" / "001_content_rag.sql"
 MODEL = "text-embedding-3-small"
@@ -118,6 +120,22 @@ def test_backend_first_initial_import_and_idempotence(database):
     assert database.execute("SELECT count(*) FROM public.book_editions").fetchone() == (1,)
     assert database.execute("SELECT count(*) FROM public.passages").fetchone() == (1,)
     assert database.execute("SELECT count(*) FROM content_ingestion.imports").fetchone() == (2,)
+
+
+def test_checked_in_epub_satisfies_canonical_backend_locations(database):
+    migrate(database)
+    apply_schema(database, SCHEMA)
+    book = parse_epub(Path(__file__).parents[2] / "books/egw/steps_to_christ.epub")
+    embedded = tuple(
+        replace(chunk, embedding=(0.01,) * EMBEDDING_DIMENSIONS)
+        for chunk in build_chunks(book)
+    )
+    store_book(database, book, embedded, embedding_model=MODEL)
+    assert imported(database, book)
+    assert database.execute(
+        "SELECT count(*), count(DISTINCT chapter_number), count(DISTINCT sequence) "
+        "FROM public.passages WHERE is_active"
+    ).fetchone() == (273, 13, 273)
 
 
 def test_revision_replacement_preserves_ids_other_languages_and_approval_integrity(database):

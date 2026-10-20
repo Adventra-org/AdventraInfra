@@ -10,7 +10,7 @@ from psycopg import Connection
 from .embeddings import EMBEDDING_DIMENSIONS
 from .models import BookDocument, RagChunk
 
-IMPORTER_VERSION = "2.0.0"
+IMPORTER_VERSION = "2.0.1"
 
 
 def connect_from_environment() -> Connection:

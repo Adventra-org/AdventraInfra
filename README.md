@@ -276,6 +276,9 @@ AdventraBackend migrations exclusively own `public.books`,
 preserves stable passage IDs and printed-page citations, and marks removed
 passages inactive rather than deleting records referenced by user features.
 Re-imports update paragraph order as well as text and locations.
+The EPUB Foreword is excluded from reader and AI ingestion; the published
+chapters 1-13 retain their numbers and stable paragraph IDs. Passage sequence
+is positive and unique across the entire book, not restarted in each chapter.
 
 Import attempts, source/publisher metadata, revision history, chapter metadata
 and pgvector chunks live in `content_ingestion.imports`, `editions`, `chapters`

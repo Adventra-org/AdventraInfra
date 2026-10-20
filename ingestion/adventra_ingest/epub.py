@@ -155,6 +155,7 @@ def _parse_chapters(
     paragraphs_on_page: dict[int, int] = {}
 
     chapters: list[Chapter] = []
+    sequence = 0
     for root in roots:
         title = _document_title(root)
         paragraphs: list[tuple[str, int | None, int | None, int | None]] = []
@@ -184,11 +185,11 @@ def _parse_chapters(
                 page_paragraph = paragraphs_on_page.get(page_start, 0) + 1
                 paragraphs_on_page[page_start] = page_paragraph
             paragraphs.append((text, page_start, page_end, page_paragraph))
-        if not title or not paragraphs:
+        if not title or not paragraphs or title.strip().casefold() == "foreword":
             continue
 
         number_match = _CHAPTER_NUMBER.search(title)
-        number = int(number_match.group(1)) if number_match else len(chapters)
+        number = int(number_match.group(1)) if number_match else len(chapters) + 1
         if any(chapter.number == number for chapter in chapters):
             number = max((chapter.number for chapter in chapters), default=-1) + 1
         chapter_id = f"{book_id}:{language}:chapter-{number:03d}"
@@ -198,7 +199,7 @@ def _parse_chapters(
                 chapter_id=chapter_id,
                 chapter_number=number,
                 paragraph_number=index,
-                sequence=index,
+                sequence=sequence + index,
                 text=text,
                 content_hash=_sha256(text),
                 page_start=page_start,
@@ -209,6 +210,7 @@ def _parse_chapters(
                 paragraphs, start=1
             )
         )
+        sequence += len(passages)
         chapters.append(
             Chapter(
                 chapter_id=chapter_id,

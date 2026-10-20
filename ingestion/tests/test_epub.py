@@ -16,8 +16,18 @@ def test_parses_sample_book_metadata_and_content() -> None:
     assert book.author == "Ellen G. White"
     assert book.language == "en"
     assert book.source_path == "books/egw/steps_to_christ.epub"
-    assert len(book.chapters) == 14
+    assert len(book.chapters) == 13
+    assert [chapter.number for chapter in book.chapters] == list(range(1, 14))
+    assert all(chapter.title.casefold() != "foreword" for chapter in book.chapters)
     assert sum(len(chapter.passages) for chapter in book.chapters) > 100
+
+
+def test_reader_locations_have_positive_chapters_and_book_wide_sequence() -> None:
+    book = parse_epub(SAMPLE_BOOK)
+    passages = [passage for chapter in book.chapters for passage in chapter.passages]
+    assert all(p.chapter_number > 0 and p.paragraph_number > 0 for p in passages)
+    assert [p.sequence for p in passages] == list(range(1, len(passages) + 1))
+    assert book.chapters[0].passages[0].passage_id.endswith("chapter-001:p0001")
 
 
 def test_passage_ids_are_stable() -> None:
