@@ -229,7 +229,9 @@ It refuses any connection outside the fixed development PostgreSQL host and
 `backendDatabaseMode=rebuild` is destructive and requires explicit approval plus
 `backendDatabaseConfirmation=RESET adventra`. It deactivates all backend revisions, drops and
 recreates only `adventra`, and leaves the API offline until a verified backend
-image is deployed to apply its embedded migrations. Keycloak's separate
+image is deployed to apply its embedded migrations. The existing CI database
+owner performs the reset; database/schema grants and installed extensions are
+restored without creating roles. Keycloak's separate
 `keycloak` database, the `egw` database, server configuration, secrets and roles
 are unchanged. This removes imported content as well as application records;
 external data must be re-ingested separately after schema compatibility is

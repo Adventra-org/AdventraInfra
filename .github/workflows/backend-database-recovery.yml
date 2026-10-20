@@ -53,6 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$RECOVERY_MODE" = "inspect" || test "$RECOVERY_MODE" = "rebuild"
           test "$(az account show --query id -o tsv)" = "9ab32d5c-5f7a-413a-b251-8598b4546692"
           command -v psql
           SECRET_NAME=$(az containerapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" \
@@ -93,6 +94,21 @@ jobs:
                       raise SystemExit("Unexpected newline in connection field.")
                   output.write(f"{key}={value}\n")
           PY
+      - name: Use existing database owner identity without changing roles
+        shell: bash
+        run: |
+          set -euo pipefail
+          OWNER=$(psql -X -At -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()")
+          APP_ID=$(az account show --query user.name -o tsv)
+          DEPLOYMENT_USER=$(az ad sp show --id "$APP_ID" --query displayName -o tsv)
+          test "$OWNER" = "$DEPLOYMENT_USER"
+          TOKEN=$(az account get-access-token --resource-type oss-rdbms --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          {
+            echo "PGUSER=$DEPLOYMENT_USER"
+            echo "PGPASSWORD=$TOKEN"
+          } >> "$GITHUB_ENV"
       - name: Inspect schema and migration metadata only
         shell: bash
         run: |
@@ -102,6 +118,7 @@ jobs:
                  pg_get_userbyid(datdba) AS owner,
                  pg_encoding_to_char(encoding) AS encoding, datcollate, datctype
           FROM pg_database WHERE datname = current_database();
+          SELECT rolname, rolcreatedb FROM pg_roles WHERE rolname = current_user;
           SELECT extname, extversion FROM pg_extension ORDER BY extname;
           SELECT table_schema, table_name FROM information_schema.tables
           WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY 1, 2;
@@ -129,6 +146,26 @@ jobs:
             "SELECT pg_encoding_to_char(encoding) = 'UTF8' AND datcollate = 'en_US.utf8' AND datctype = 'en_US.utf8' FROM pg_database WHERE datname = current_database()")" = "t"
           test "$(psql -X -At -v ON_ERROR_STOP=1 -c \
             "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user")" = "t"
+          DATABASE_GRANTS=$(psql -X -At -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT format('GRANT %s ON DATABASE adventra TO %s%s;', privilege_type,
+                        CASE WHEN grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(grantee)) END,
+                        CASE WHEN is_grantable THEN ' WITH GRANT OPTION' ELSE '' END)
+          FROM pg_database d,
+               LATERAL aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba)))
+          WHERE datname = current_database();
+          SQL
+          )
+          SCHEMA_GRANTS=$(psql -X -At -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT format('GRANT %s ON SCHEMA public TO %s%s;', privilege_type,
+                        CASE WHEN grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(grantee)) END,
+                        CASE WHEN is_grantable THEN ' WITH GRANT OPTION' ELSE '' END)
+          FROM pg_namespace n,
+               LATERAL aclexplode(COALESCE(n.nspacl, acldefault('n', n.nspowner)))
+          WHERE nspname = 'public';
+          SQL
+          )
+          EXTENSIONS=$(psql -X -At -v ON_ERROR_STOP=1 -c \
+            "SELECT format('CREATE EXTENSION IF NOT EXISTS %I;', extname) FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY extname")
           # No old application revision may recreate its legacy schema during recovery.
           mapfile -t REVISIONS < <(az containerapp revision list -g "$RESOURCE_GROUP" -n "$APP_NAME" \
             --query '[?properties.active].name' -o tsv)
@@ -144,5 +181,10 @@ jobs:
                         current_user, 'UTF8', 'en_US.utf8', 'en_US.utf8') \gexec
           SQL
           psql -X -v ON_ERROR_STOP=1 -c \
-            "SELECT current_database(), count(*) AS application_tables FROM information_schema.tables WHERE table_schema = 'public'"
-          echo "The adventra database is empty. Deploy the verified backend image to run all embedded migrations."
+            "REVOKE ALL ON DATABASE adventra FROM PUBLIC; REVOKE ALL ON SCHEMA public FROM PUBLIC"
+          printf '%s\n' "$DATABASE_GRANTS" "$SCHEMA_GRANTS" "$EXTENSIONS" |
+            psql -X -v ON_ERROR_STOP=1
+          psql -X -v ON_ERROR_STOP=1 -c \
+            "SELECT current_database(), to_regclass('public._sqlx_migrations') AS migrations, to_regclass('public.book_editions') AS book_editions"
+          echo "The adventra application data was reset; existing database/schema grants and extensions were restored."
+          echo "Deploy the verified backend image to run all embedded migrations."
