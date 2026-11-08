@@ -203,6 +203,27 @@ class HymnalConversionTests(unittest.TestCase):
         self.assertEqual(manifest["hymns"][0]["number"], 1)
         self.assertEqual(provenance["missing_numbers"], {"en": []})
 
+    def test_cli_unapproved_rights_never_publish_output(self) -> None:
+        self.metadata["hymns"][0]["rights"]["status"] = "pending"
+        self.metadata_path.write_text(json.dumps(self.metadata), encoding="utf-8")
+        output = self.root / "manifest.json"
+        command = [
+            sys.executable, "-m", "hymnal.cli", "--raw-dir", str(self.raw),
+            "--metadata", str(self.metadata_path), "--output", str(output),
+        ]
+        for existing_output in [None, b"Previously approved manifest"]:
+            with self.subTest(existing_output=existing_output):
+                if existing_output is not None:
+                    output.write_bytes(existing_output)
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("approved rights", result.stderr)
+                self.assertEqual(result.stdout, "")
+                if existing_output is None:
+                    self.assertFalse(output.exists())
+                else:
+                    self.assertEqual(output.read_bytes(), existing_output)
+
     def test_cli_reports_checksum_and_preserves_output_on_failure(self) -> None:
         self.run_conversion()
         output = self.root / "manifest.json"

@@ -338,6 +338,7 @@ The [Hymnal source checks](.github/workflows/hymnal-source-checks.yml) workflow
 runs these tests and the synthetic conversion on hymnal changes and on manual
 dispatch. It has read-only repository permission and no Azure credentials.
 Hymnal-only changes are excluded from the book-ingestion push trigger.
+Manual dispatch requires this workflow to be present on GitHub's default branch.
 
 For approved content, preserve the original snapshot and edit only curated
 files/metadata. Increase `revision` when changing an imported catalog, regenerate,
