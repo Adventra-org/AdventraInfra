@@ -1,0 +1,22 @@
+{
+  "revision": 1,
+  "source_uri": "urn:synthetic:adventra-hymnal-converter",
+  "approval_reference": "synthetic-example-only",
+  "complete_catalog": false,
+  "languages": ["en"],
+  "hymns": [
+    {
+      "file": "001.txt",
+      "hymn_id": "synthetic-001",
+      "number": 1,
+      "language": "en",
+      "category": "Example",
+      "copyright_notice": "Original synthetic example, not a hymn from the source repository.",
+      "rights": {
+        "status": "approved",
+        "basis": "original",
+        "reference": "Original demonstration text authored for this converter; not permission for any real hymn."
+      }
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+001 - Synthetic example
+
+Original example text for converter validation.
+
+Another original example stanza.

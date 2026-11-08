@@ -7,6 +7,8 @@ on:
     paths:
       - 'books/**/*.epub'
       - 'ingestion/**'
+      - '!ingestion/hymnal/**'
+      - '!ingestion/tests/test_hymnal.py'
       - '.github/workflows/infra-ingest.yml'
   workflow_dispatch:
     inputs:

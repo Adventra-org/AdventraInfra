@@ -238,6 +238,115 @@ external data must be re-ingested separately after schema compatibility is
 verified. Existing Keycloak identities remain, but their application records
 and application-only eligibility are lost.
 
+### Hymnal source preparation (offline)
+
+Hymnal ingestion remains tracked in
+[Backend #63](https://github.com/Adventra-org/AdventraBackend/issues/63).
+GitHub issues, not local TODO documents, are the source of truth for remaining
+work. This preparation tooling does not download lyrics or import/publish data.
+
+[Source metadata](data/adventist-hymnal/source.json) pins
+`ariseforgod/adventist_hymnal/raw_text` to commit
+`7e3748ab3062872b675cdf769ad244ce5e6182b7`. That revision contains **694**
+text files; **579.txt and 696.txt are absent**. No source lyrics have been
+archived here. The repository has no declared license; neither its public
+availability nor this metadata establishes rights for every hymn.
+
+#### Editable source and import format
+
+For rights-reviewed material, keep an untouched, commit-pinned source snapshot
+separate from editable, language-specific files. Record permission/public-domain
+evidence for each selected text, including applicable translations and
+arrangements. Do not label an entire collection approved merely because some
+entries are old or freely downloadable.
+
+The offline converter accepts local UTF-8 text files with this layout:
+
+```text
+001 - Synthetic example
+
+Original example stanza.
+
+Another original example stanza.
+```
+
+The first nonblank line must contain the matching hymn number, a hyphen/en dash/
+em dash, and the title. The remaining text becomes `lyrics`. It removes a UTF-8
+BOM, normalizes CRLF/CR to LF and trims outer blank lyric lines; stanza breaks,
+verse labels, punctuation and spelling are otherwise preserved. It does not
+guess title/lyrics boundaries for other layouts.
+
+Review metadata uses the Backend `HymnalImport` top-level fields: `revision`,
+`source_uri`, `approval_reference`, `complete_catalog`, `languages` and `hymns`.
+Each hymn supplies `file` (relative to the source directory), stable `hymn_id`,
+`number`, lowercase `language`, `category`, `copyright_notice`, and:
+
+```json
+"rights": {
+  "status": "approved",
+  "basis": "public_domain",
+  "reference": "A specific, verified source for this text's public-domain status"
+}
+```
+
+Supported bases are `public_domain`, `permission` and `original`. This is a
+required review declaration, not automated legal verification. Pending, missing
+or unsupported rights metadata stops conversion. No records are silently
+excluded. For a partial approved subset, list only those reviewed files and set
+`complete_catalog` to `false`.
+
+Composer, key, tempo, time signature, tags and stable HTTPS MP3/FLAC mappings
+are optional. Do not invent missing categories, credits, rights notices or audio.
+Translations share an ID/number (for example `sdah-001`) and have separate
+language rows/files. Do not change an ID or reassign its number after import.
+
+Output matches the existing
+[Backend JSON contract](https://github.com/Adventra-org/AdventraBackend/blob/dev/README.md#hymnal-manifest):
+`file` and `rights` are excluded; `title` and `lyrics` come from the local file.
+No new database schema is needed. Unknown fields, inconsistent identities,
+invalid text/byte limits, unsafe paths and invalid music mappings fail explicitly.
+`complete_catalog=true` requires numbers **1-696 in every declared language**;
+the linked 694-file source cannot meet that condition without separately reviewed
+missing content.
+
+#### Convert and validate
+
+Python 3.10+ is required; the converter and tests use only the standard library.
+Try the original synthetic fixture (not real hymn text):
+
+```bash
+cd ingestion
+python3 -m hymnal.cli \
+  --raw-dir hymnal/examples \
+  --metadata hymnal/examples/metadata.json \
+  --output /tmp/adventra-hymnal-example.json \
+  > /tmp/adventra-hymnal-example.provenance.json
+
+python3 -m unittest discover -s tests -p 'test_hymnal.py' -v
+```
+
+The requested output directory must exist. A successful run atomically replaces
+the generated manifest and prints a provenance JSON report to stdout. Retain
+that report: it includes the manifest SHA-256, metadata SHA-256, every input-file
+SHA-256, rights declarations, normalization rules and missing numbers by
+language. Errors exit with status 2 and preserve an existing output when input
+validation fails. The output cannot overwrite metadata or anything inside the
+source directory. There are no network requests, database writes or media
+downloads.
+
+The [Hymnal source checks](.github/workflows/hymnal-source-checks.yml) workflow
+runs these tests and the synthetic conversion on hymnal changes and on manual
+dispatch. It has read-only repository permission and no Azure credentials.
+Hymnal-only changes are excluded from the book-ingestion push trigger.
+
+For approved content, preserve the original snapshot and edit only curated
+files/metadata. Increase `revision` when changing an imported catalog, regenerate,
+review the diff, and record fresh approval and checksums. Backend import publishes
+the supplied entries; a generated checksum alone is not permission to publish.
+Use the existing approved-content workflow or the Backend's documented
+`import-content hymnal <manifest.json> <expected-sha256>` command only after that
+review. Never import the synthetic example into a live catalog.
+
 ### 4) Ingest Books
 
 Add EPUB files under `books/<collection>/`. The

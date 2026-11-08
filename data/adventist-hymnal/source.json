@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/ariseforgod/adventist_hymnal",
+  "directory": "raw_text",
+  "revision": "7e3748ab3062872b675cdf769ad244ce5e6182b7",
+  "tree_sha": "12f9282a13bb13891fcca9a9b93f7636ae306af6",
+  "observed_file_count": 694,
+  "expected_number_range": [1, 696],
+  "missing_files": ["579.txt", "696.txt"],
+  "declared_repository_license": null,
+  "rights_status": "unverified",
+  "lyrics_archived": false,
+  "note": "Metadata only. Public availability does not establish rights for every entry. Review individual texts, translations and arrangements before archiving, editing or publication."
+}
