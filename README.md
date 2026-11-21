@@ -378,6 +378,48 @@ Use the existing approved-content workflow or the Backend's documented
 `import-content hymnal <manifest.json> <expected-sha256>` command only after that
 review. Never import the synthetic example into a live catalog.
 
+### Approved hymnal import pipeline
+
+The [Import approved hymnal](.github/workflows/hymnal-import.yml) workflow is
+dev-only. Pushes affecting its code run the original synthetic example against
+disposable PostgreSQL; they never connect to Azure or publish hymn content.
+Manual dispatch defaults to validation-only and has these inputs:
+
+| Input | Meaning |
+| --- | --- |
+| `rawDirectory` | Checked-in, rights-reviewed numbered UTF-8 text directory |
+| `metadataPath` | Checked-in review JSON with approved per-hymn rights, notices and publication reference |
+| `expectedSha256` | Lowercase SHA-256 of the generated backend manifest, not of the metadata JSON |
+| `publish` | Default `false`; explicitly enable only for approved public development publication |
+| `confirmation` | Publication requires exactly `PUBLISH approved hymns to dev` |
+
+Generate the manifest with the offline converter above and use its reported
+`manifest_sha256`. Review the metadata and generated manifest before dispatch.
+Run from the `dev` branch. The workflow must also exist on GitHub's default
+branch before manual dispatch is available; pushing it to `dev` alone does not
+activate dispatch. Pending review metadata is intentionally rejected.
+
+Validation checks repository-contained paths, approved rights and the expected
+checksum, builds the canonical Backend `dev` importer with Rust 1.93.0, and
+executes the import twice against disposable PostgreSQL to check the real schema,
+record count and idempotency. The tested binary, migrations and manifest form one
+publication package; publication does not rebuild a different importer.
+
+Public development publication additionally uses the existing `development`
+GitHub environment and its configured approval rules, existing Azure OIDC secrets,
+and the deployed backend's Key Vault database connection. It validates the
+discovered development hostname/database, verifies the manifest checksum again,
+and runs the transactional backend importer. No roles, firewall settings,
+infrastructure or authentication policies are changed. Only approved content is
+supported; this is not a private testing import or a rights-review bypass.
+
+After import, API verification compares every supplied hymn's text, number,
+language, category, credits, revision and accompaniment metadata with the manifest
+without logging lyrics. Verification failure fails the workflow; it does not undo
+an already committed database import. The importer runs migrations and supports
+idempotent reruns of the same manifest. Changed content requires a higher revision;
+there is no force-overwrite or automated content deletion.
+
 ### 4) Ingest Books
 
 Add EPUB files under `books/<collection>/`. The

@@ -1,13 +1,16 @@
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from hymnal.cli import HymnalError, convert
 from hymnal.prepare import category_map, prepare
+from hymnal.verify import verify
 
 
 class HymnalConversionTests(unittest.TestCase):
@@ -245,6 +248,41 @@ class HymnalConversionTests(unittest.TestCase):
         ]:
             with self.subTest(ranges=ranges), self.assertRaises(HymnalError):
                 category_map(ranges)
+
+    def test_api_verification_checks_imported_records_across_pages(self) -> None:
+        manifest, _ = self.run_conversion()
+        first = manifest["hymns"][0]
+        manifest["hymns"] = [
+            {**first, "hymn_id": f"synthetic-{number}", "number": number}
+            for number in range(1, 102)
+        ]
+        rows = [
+            {**hymn, "revision": manifest["revision"], "has_accompaniment": False}
+            for hymn in manifest["hymns"]
+        ]
+        responses = [io.BytesIO(json.dumps(page).encode()) for page in [rows[:100], rows[100:]]]
+        with patch("hymnal.verify.urllib.request.urlopen", side_effect=responses) as request:
+            self.assertEqual(verify(manifest, "https://example.test"), 101)
+            self.assertIn("page=2", request.call_args.args[0].full_url)
+
+    def test_api_verification_rejects_missing_changed_and_duplicate_records(self) -> None:
+        manifest, _ = self.run_conversion()
+        row = {**manifest["hymns"][0], "revision": 1, "has_accompaniment": False}
+        for page in [
+            [], [{**row, "lyrics": "Different synthetic text"}], [row, row],
+            [{**row, "number": True}], [{**row, "has_accompaniment": 0}],
+        ]:
+            with self.subTest(page_length=len(page)):
+                response = io.BytesIO(json.dumps(page).encode())
+                with patch("hymnal.verify.urllib.request.urlopen", return_value=response):
+                    with self.assertRaises(HymnalError):
+                        verify(manifest, "https://example.test")
+        for url in ["http://example.test", "https://user:secret@example.test", "https://example.test/path"]:
+            with self.subTest(url=url), self.assertRaises(HymnalError):
+                verify(manifest, url)
+        for invalid in [{}, {**manifest, "hymns": []}, {**manifest, "hymns": [row, row]}]:
+            with self.subTest(invalid=invalid), self.assertRaises(HymnalError):
+                verify(invalid, "https://example.test")
 
     def test_cli_unapproved_rights_never_publish_output(self) -> None:
         self.metadata["hymns"][0]["rights"]["status"] = "pending"
