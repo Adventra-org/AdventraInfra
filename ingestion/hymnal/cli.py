@@ -179,7 +179,7 @@ def convert(raw_dir: Path, metadata_path: Path) -> tuple[dict[str, object], dict
     validated = []
     for value in entries:
         entry = object_value(value, HYMN_FIELDS, "hymn")
-        number = integer(entry.get("number"), "number", 1, 696)
+        number = integer(entry.get("number"), "number", 1, 695)
         identifier = text(entry.get("hymn_id"), "hymn_id", 80)
         if not re.fullmatch(r"[A-Za-z0-9_-]+", identifier):
             raise HymnalError("hymn_id must contain only ASCII letters, digits, hyphens or underscores.")
@@ -197,13 +197,13 @@ def convert(raw_dir: Path, metadata_path: Path) -> tuple[dict[str, object], dict
         id_numbers[identifier] = number
         number_ids[number] = identifier
         validated.append(entry)
-    missing = {tag: sorted(set(range(1, 697)) - present) for tag, present in numbers.items()}
+    missing = {tag: sorted(set(range(1, 696)) - present) for tag, present in numbers.items()}
     if any(not present for present in numbers.values()):
         raise HymnalError("Every declared language must have hymn records.")
     if complete and any(missing.values()):
-        raise HymnalError("Complete catalog requires every number 1-696 in every language.")
+        raise HymnalError("Complete catalog requires every number 1-695 in every language.")
     validated.sort(key=lambda entry: (
-        integer(entry["number"], "number", 1, 696), language(entry["language"]),
+        integer(entry["number"], "number", 1, 695), language(entry["language"]),
     ))
     records = [record(raw_dir, entry) for entry in validated]
     manifest = {

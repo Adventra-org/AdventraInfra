@@ -126,7 +126,7 @@ class HymnalConversionTests(unittest.TestCase):
 
     def test_backend_field_constraints_are_enforced(self) -> None:
         for field, invalid in [
-            ("number", True), ("number", 697), ("language", "EN"),
+            ("number", True), ("number", 696), ("language", "EN"),
             ("category", ""), ("copyright_notice", "\0"),
             ("tempo", 401), ("mp3_url", "http://example.test/audio.mp3"),
             ("mp3_url", "https://example.test/audio.mp3?token=secret"),
@@ -145,9 +145,15 @@ class HymnalConversionTests(unittest.TestCase):
                 hymn.clear()
                 hymn.update(original)
 
+    def test_number_above_695_is_rejected(self) -> None:
+        self.metadata["hymns"][0]["number"] = 696
+        self.source.write_text("696 - Synthetic title\n\nOriginal test text.", encoding="utf-8")
+        with self.assertRaisesRegex(HymnalError, "number must be an integer in 1-695"):
+            self.run_conversion()
+
     def test_complete_catalog_requires_every_number_in_every_language(self) -> None:
         self.metadata["complete_catalog"] = True
-        with self.assertRaisesRegex(HymnalError, "1-696"):
+        with self.assertRaisesRegex(HymnalError, "1-695"):
             self.run_conversion()
         self.metadata["complete_catalog"] = False
         self.metadata["languages"].append("es")
@@ -188,7 +194,7 @@ class HymnalConversionTests(unittest.TestCase):
     def test_complete_synthetic_catalog_is_accepted_and_sorted(self) -> None:
         first = self.metadata["hymns"][0]
         self.metadata["hymns"] = []
-        for number in range(696, 0, -1):
+        for number in range(695, 0, -1):
             filename = f"{number:03}.txt"
             (self.raw / filename).write_text(
                 f"{number} - Synthetic {number}\n\nOriginal test text.", encoding="utf-8"
@@ -199,7 +205,7 @@ class HymnalConversionTests(unittest.TestCase):
             })
         self.metadata["complete_catalog"] = True
         manifest, provenance = self.run_conversion()
-        self.assertEqual(len(manifest["hymns"]), 696)
+        self.assertEqual(len(manifest["hymns"]), 695)
         self.assertEqual(manifest["hymns"][0]["number"], 1)
         self.assertEqual(provenance["missing_numbers"], {"en": []})
 

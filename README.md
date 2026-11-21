@@ -248,8 +248,10 @@ work. This preparation tooling does not download lyrics or import/publish data.
 [Source metadata](data/adventist-hymnal/source.json) pins
 `ariseforgod/adventist_hymnal/raw_text` to commit
 `7e3748ab3062872b675cdf769ad244ce5e6182b7`. That revision contains **694**
-text files; **579.txt and 696.txt are absent**. No source lyrics have been
-archived here. The repository has no declared license; neither its public
+text files; **579.txt is absent from that upstream revision**. The 1985
+English hymnal contains 695 hymns; number 696 is not a required hymn.
+This metadata describes the upstream snapshot, not additions to local files.
+The repository has no declared license; neither its public
 availability nor this metadata establishes rights for every hymn.
 
 #### Editable source and import format
@@ -305,7 +307,7 @@ Output matches the existing
 `file` and `rights` are excluded; `title` and `lyrics` come from the local file.
 No new database schema is needed. Unknown fields, inconsistent identities,
 invalid text/byte limits, unsafe paths and invalid music mappings fail explicitly.
-`complete_catalog=true` requires numbers **1-696 in every declared language**;
+`complete_catalog=true` requires numbers **1-695 in every declared language**;
 the linked 694-file source cannot meet that condition without separately reviewed
 missing content.
 
