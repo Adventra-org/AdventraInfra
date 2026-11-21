@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from hymnal.cli import HymnalError, convert
+from hymnal.prepare import category_map, prepare
 
 
 class HymnalConversionTests(unittest.TestCase):
@@ -208,6 +209,42 @@ class HymnalConversionTests(unittest.TestCase):
         self.assertEqual(len(manifest["hymns"]), 695)
         self.assertEqual(manifest["hymns"][0]["number"], 1)
         self.assertEqual(provenance["missing_numbers"], {"en": []})
+        draft = prepare(self.raw)
+        self.assertEqual(len(draft["hymns"]), 695)
+        self.assertEqual(draft["hymns"][0]["hymn_id"], "sdah-001")
+        self.assertEqual(draft["hymns"][-1]["hymn_id"], "sdah-695")
+        self.assertEqual(draft["hymns"][583]["category"], "Christian Life / Loving Service")
+        self.assertEqual(draft["languages"], ["en"])
+        self.assertTrue(all(hymn["language"] == "en" for hymn in draft["hymns"]))
+        self.assertTrue(all(hymn["rights"]["status"] == "pending" for hymn in draft["hymns"]))
+        self.assertTrue(all("lyrics" not in hymn and "title" not in hymn for hymn in draft["hymns"]))
+        draft["approval_reference"] = "Synthetic review reference"
+        self.metadata_path.write_text(json.dumps(draft), encoding="utf-8")
+        with self.assertRaisesRegex(HymnalError, "approved rights"):
+            convert(self.raw, self.metadata_path)
+        self.source.write_text("002 - Mismatched heading\n\nSynthetic text.", encoding="utf-8")
+        with self.assertRaisesRegex(HymnalError, "mismatched"):
+            prepare(self.raw)
+
+    def test_preparation_cli_missing_text_does_not_emit_partial_metadata(self) -> None:
+        original = self.source.read_bytes()
+        result = subprocess.run([
+            sys.executable, "-m", "hymnal.prepare", "--raw-dir", str(self.raw),
+        ], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("002.txt", result.stderr)
+        self.assertEqual(self.source.read_bytes(), original)
+
+    def test_category_ranges_reject_gaps_overlaps_and_invalid_bounds(self) -> None:
+        for ranges in [
+            [[1, 694, "Example"]],
+            [[1, 695, "Example"], [695, 695, "Overlap"]],
+            [[1, 696, "Example"]],
+            [[2, 1, "Reversed"]],
+        ]:
+            with self.subTest(ranges=ranges), self.assertRaises(HymnalError):
+                category_map(ranges)
 
     def test_cli_unapproved_rights_never_publish_output(self) -> None:
         self.metadata["hymns"][0]["rights"]["status"] = "pending"

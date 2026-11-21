@@ -256,6 +256,34 @@ availability nor this metadata establishes rights for every hymn.
 
 #### Editable source and import format
 
+Keep hymn text in the existing UTF-8 `.txt` files and review metadata in JSON.
+The text layout is already supported; YAML adds no parsing benefit here, and
+duplicating lyrics in a hand-edited JSON/YAML catalog risks divergent copies.
+Generated backend import JSON contains the combined title, lyrics and metadata.
+
+The [English category ranges](ingestion/hymnal/categories.json) cover numbers
+1-695 using the linked 1985 hymnal topic index. Categories include section and
+topic, for example `Christian Life / Loving Service` for hymn 584.
+They may be refined during review; they do not establish publication rights.
+
+To prepare a new metadata draft from all 695 local texts:
+
+```bash
+cd ingestion
+(set -C; python3 -m hymnal.prepare \
+  --raw-dir ../data/adventist-hymnal/hymn_text \
+  > ../data/adventist-hymnal/review-metadata.json)
+```
+
+This assigns stable IDs `sdah-001` through `sdah-695`, language `en`, and
+categories without copying lyrics. Titles remain in the text headings.
+The shell's no-clobber setting protects existing review edits. Do not regenerate
+over reviewed metadata: edit the JSON sidecar directly instead.
+Copyright notices, per-hymn rights evidence and the publication approval reference
+remain blank/pending; conversion will reject this draft until review is complete.
+The pinned upstream source excludes the separately supplied local hymn 579;
+record its source evidence in that hymn's rights reference during review.
+
 For rights-reviewed material, keep an untouched, commit-pinned source snapshot
 separate from editable, language-specific files. Record permission/public-domain
 evidence for each selected text, including applicable translations and
