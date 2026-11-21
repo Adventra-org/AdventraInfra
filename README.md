@@ -380,8 +380,9 @@ review. Never import the synthetic example into a live catalog.
 
 ### Approved hymnal import pipeline
 
-The [Import approved hymnal](.github/workflows/hymnal-import.yml) workflow is
-dev-only. Pushes affecting its code run the original synthetic example against
+The [Import approved hymnal](https://github.com/Adventra-org/AdventraBackend/blob/dev/.github/workflows/hymnal-import.yml)
+workflow runs in the private Backend repository using its own scoped token and
+checks out public Infra inputs. It is dev-only. Pushes affecting its code run the original synthetic example against
 disposable PostgreSQL; they never connect to Azure or publish hymn content.
 Manual dispatch defaults to validation-only and has these inputs:
 
