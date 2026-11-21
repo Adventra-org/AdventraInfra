@@ -382,7 +382,8 @@ review. Never import the synthetic example into a live catalog.
 
 The [Import approved hymnal](https://github.com/Adventra-org/AdventraBackend/blob/dev/.github/workflows/hymnal-import.yml)
 workflow runs in the private Backend repository using its own scoped token and
-checks out public Infra inputs. It is dev-only. Pushes affecting its code run the original synthetic example against
+checks out public Infra inputs. It is dev-only. Pushes affecting its code run
+the original synthetic example against
 disposable PostgreSQL; they never connect to Azure or publish hymn content.
 Manual dispatch defaults to validation-only and has these inputs:
 
@@ -396,15 +397,18 @@ Manual dispatch defaults to validation-only and has these inputs:
 
 Generate the manifest with the offline converter above and use its reported
 `manifest_sha256`. Review the metadata and generated manifest before dispatch.
-Run from the `dev` branch. The workflow must also exist on GitHub's default
-branch before manual dispatch is available; pushing it to `dev` alone does not
+Run from Backend's `dev` branch. The workflow must also exist on Backend's default
+branch (`master`) before manual dispatch is available; pushing it to `dev` alone
+does not
 activate dispatch. Pending review metadata is intentionally rejected.
 
 Validation checks repository-contained paths, approved rights and the expected
-checksum, builds the canonical Backend `dev` importer with Rust 1.93.0, and
+checksum, builds the canonical Backend importer at the triggering commit with
+Rust 1.93.0, and
 executes the import twice against disposable PostgreSQL to check the real schema,
 record count and idempotency. The tested binary, migrations and manifest form one
-publication package; publication does not rebuild a different importer.
+publication package; publication does not rebuild a different importer. The
+publication job also checks out the same Infra commit used during validation.
 
 Public development publication additionally uses the existing `development`
 GitHub environment and its configured approval rules, existing Azure OIDC secrets,
